@@ -21,29 +21,77 @@ class OperateurController extends BaseController
     }
 
     // ------------------------------------------------------------------
+    // Authentification operateur
+    // ------------------------------------------------------------------
+
+    public function login()
+    {
+        return view('operateur/login');
+    }
+
+    public function attempt()
+    {
+        $motDePasse = env('operateur.password', 'operateur123');
+
+        if ($this->request->getPost('password') !== $motDePasse) {
+            return redirect()->back()->with('error', 'Mot de passe incorrect.');
+        }
+
+        session()->set('is_operateur', true);
+
+        return redirect()->to(site_url('operateur/prefixes'));
+    }
+
+    // ------------------------------------------------------------------
     // Prefixes
     // ------------------------------------------------------------------
 
     public function prefixes()
     {
         return view('operateur/prefixes', [
-            'prefixes' => $this->prefixeModel->orderBy('prefixe', 'ASC')->findAll(),
+            'prefixes' => $this->prefixeModel->orderBy('status', 'ASC')->orderBy('prefixe', 'ASC')->findAll(),
         ]);
     }
 
     public function storePrefixe()
     {
         $rules = [
-            'prefixe' => 'required|regex_match[/^[0-9]{2,5}$/]|is_unique[prefixes.prefixe]',
+            'prefixe'                => 'required|regex_match[/^[0-9]{2,5}$/]|is_unique[prefixes.prefixe]',
+            'status'                 => 'permit_empty|in_list[principal,autre]',
+            'pourcentage_commission' => 'permit_empty|numeric|greater_than_equal_to[0]|less_than_equal_to[100]',
         ];
 
         if (! $this->validate($rules)) {
             return redirect()->to('operateur/prefixes')->withInput()->with('errors', $this->validator->getErrors());
         }
 
-        $this->prefixeModel->insert(['prefixe' => $this->request->getPost('prefixe')]);
+        $status     = $this->request->getPost('status') === 'autre' ? 'autre' : 'principal';
+        $commission = $status === 'autre' ? (float) $this->request->getPost('pourcentage_commission') : 0;
+
+        $this->prefixeModel->insert([
+            'prefixe'                => $this->request->getPost('prefixe'),
+            'status'                 => $status,
+            'pourcentage_commission' => $commission,
+        ]);
 
         return redirect()->to('operateur/prefixes')->with('success', 'Prefixe ajoute.');
+    }
+
+    public function updateCommission(int $id)
+    {
+        $rules = [
+            'pourcentage_commission' => 'required|numeric|greater_than_equal_to[0]|less_than_equal_to[100]',
+        ];
+
+        if (! $this->validate($rules)) {
+            return redirect()->to('operateur/prefixes')->with('errors', $this->validator->getErrors());
+        }
+
+        $this->prefixeModel->update($id, [
+            'pourcentage_commission' => $this->request->getPost('pourcentage_commission'),
+        ]);
+
+        return redirect()->to('operateur/prefixes')->with('success', 'Commission mise a jour.');
     }
 
     public function deletePrefixe(int $id)
@@ -115,6 +163,8 @@ class OperateurController extends BaseController
     {
         $db = Database::connect();
 
+        // Gains de notre operateur (frais standard, interne ET externe confondus :
+        // le frais de transfert nous revient toujours, seule la commission part ailleurs)
         $gains = $db->table('transactions')
             ->select('types_operation.libelle AS libelle, SUM(transactions.frais) AS total_frais, COUNT(transactions.id) AS nb_operations')
             ->join('types_operation', 'types_operation.id = transactions.type_operation_id')
@@ -124,9 +174,20 @@ class OperateurController extends BaseController
 
         $totalGeneral = array_sum(array_column($gains, 'total_frais'));
 
+        // Montants dus aux autres operateurs : montant brut (a transmettre au
+        // destinataire) + commission (leur part), groupes par prefixe externe.
+        $situationOperateurs = $db->table('transactions')
+            ->select('prefixes.prefixe AS prefixe, SUM(transactions.montant) AS total_montant, SUM(transactions.commission) AS total_commission, COUNT(transactions.id) AS nb_operations')
+            ->join('prefixes', 'prefixes.prefixe = SUBSTR(transactions.numero_externe, 1, 3)', 'inner', false)
+            ->where('transactions.numero_externe IS NOT NULL')
+            ->groupBy('prefixes.prefixe')
+            ->get()
+            ->getResultArray();
+
         return view('operateur/gains', [
-            'gains'        => $gains,
-            'totalGeneral' => $totalGeneral,
+            'gains'               => $gains,
+            'totalGeneral'        => $totalGeneral,
+            'situationOperateurs' => $situationOperateurs,
         ]);
     }
 }
