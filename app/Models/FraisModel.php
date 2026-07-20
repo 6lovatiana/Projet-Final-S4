@@ -6,14 +6,15 @@ use CodeIgniter\Model;
 
 class FraisModel extends Model
 {
-    protected $table = 'frais';
-    protected $primaryKey = 'id';
-
-    protected $allowedFields = ['type_operation_id', 'min', 'max', 'valeur'];
+    protected $table         = 'frais';
+    protected $primaryKey    = 'id';
+    protected $returnType    = 'array';
     protected $useTimestamps = false;
 
+    protected $allowedFields = ['type_operation_id', 'min', 'max', 'valeur'];
+
     /**
-     * Bareme de frais d'un type d'operation, tri par tranche croissante.
+     * Retourne les lignes de frais pour un type d'operation donné.
      */
     public function pourType(int $typeOperationId): array
     {

@@ -13,6 +13,7 @@
             <div class="card-body p-4">
                 <h1 class="h4 mb-3">Retrait</h1>
                 <form method="post" action="<?= site_url('client/retrait') ?>">
+                    <?= csrf_field() ?>
                     <div class="mb-3">
                         <label for="montant" class="form-label">Montant (Ar)</label>
                         <input

@@ -29,7 +29,7 @@ class AuthController extends BaseController
 
         $prefixe = substr($numero, 0, 3);
 
-        $prefixeValide = Database::connect()->table('prefixes')
+        $prefixeValide = db_connect()->table('prefixes')
             ->where('prefixe', $prefixe)
             ->countAllResults() > 0;
 

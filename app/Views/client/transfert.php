@@ -13,6 +13,7 @@
             <div class="card-body p-4">
                 <h1 class="h4 mb-3">Transfert</h1>
                 <form method="post" action="<?= site_url('client/transfert') ?>">
+                    <?= csrf_field() ?>
                     <div class="mb-3">
                         <label for="destinataire" class="form-label">Numero du destinataire</label>
                         <input
