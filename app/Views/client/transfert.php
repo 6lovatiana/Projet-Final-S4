@@ -21,7 +21,7 @@
                             class="form-control"
                             id="destinataire"
                             name="destinataire"
-                            placeholder="Ex : 0331234567"
+                            placeholder="Ex : 0335555555"
                             value="<?= esc(old('destinataire')) ?>"
                             required
                         >
