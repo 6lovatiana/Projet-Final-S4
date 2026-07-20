@@ -47,8 +47,15 @@
                             required
                         >
                     </div>
+                    <div class="form-check mb-3">
+                        <input type="checkbox" class="form-check-input" id="inclure_frais_retrait" name="inclure_frais_retrait" value="1">
+                        <label class="form-check-label" for="inclure_frais_retrait">
+                            Inclure les frais de retrait (le destinataire recevra le montant + le frais qu'il paierait au retrait)
+                        </label>
+                    </div>
                     <button type="submit" class="btn btn-primary w-100">Transférer</button>
                 </form>
+                <a href="<?= site_url('client/transfert-multiple') ?>" class="d-block text-center mt-2 small">Envoyer a plusieurs destinataires a la fois</a>
             </div>
         </div>
 

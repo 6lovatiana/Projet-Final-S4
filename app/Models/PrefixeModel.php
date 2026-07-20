@@ -11,10 +11,11 @@ class PrefixeModel extends Model
     protected $returnType    = 'array';
     protected $useTimestamps = false;
 
-    protected $allowedFields = ['prefixe'];
+    protected $allowedFields = ['prefixe', 'status', 'pourcentage_commission'];
 
     protected $validationRules = [
         'prefixe' => 'required|is_unique[prefixes.prefixe,,id]',
+        'status'  => 'permit_empty|in_list[principal,autre]',
     ];
 
     protected $validationMessages = [
@@ -23,4 +24,15 @@ class PrefixeModel extends Model
             'is_unique' => 'Ce prefixe existe deja.',
         ],
     ];
+
+    /**
+     * Prefixes des autres operateurs uniquement (pour identifier un numero de
+     * destination externe lors d'un transfert).
+     */
+    public function findAutrePrefixe(string $numero): ?array
+    {
+        return $this->where('prefixe', substr($numero, 0, 3))
+            ->where('status', 'autre')
+            ->first();
+    }
 }
