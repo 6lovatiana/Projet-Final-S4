@@ -21,7 +21,7 @@ Workflow git suggere :
 
 ---
 
-## Lot 1 — Côté Opérateur  Termine
+## Lot 1 — Côté Opérateur (ETU003968)Termine
 
 **Fichiers créés (propres à ce lot, aucun croisement avec le Lot 2) :**
 
@@ -449,7 +449,7 @@ app/Views/operateur/_flash.php      (partial messages succes/erreur, reutilise p
 
 ---
 
-## Lot 2 — Côté Client ✅ Termine
+## Lot 2 — Côté Client (ETU004311) Termine
 
 **Fichiers créés (propres à ce lot, aucun croisement avec le Lot 1) :**
 
