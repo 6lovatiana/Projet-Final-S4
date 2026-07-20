@@ -16,6 +16,7 @@
         </button>
         <div class="collapse navbar-collapse" id="navMain">
             <ul class="navbar-nav me-auto">
+                <?php if (session()->get('client_id')): ?>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Client</a>
                     <ul class="dropdown-menu">
@@ -35,8 +36,13 @@
                         <li><a class="dropdown-item" href="<?= site_url('operateur/gains') ?>">Gains</a></li>
                     </ul>
                 </li>
+                <?php endif; ?>
             </ul>
-            <a class="btn btn-outline-light btn-sm" href="<?= site_url('login') ?>">Login</a>
+            <?php if (session()->get('client_id')): ?>
+                <a class="btn btn-outline-danger btn-sm" href="<?= site_url('logout') ?>">Logout</a>
+            <?php else: ?>
+                <a class="btn btn-outline-light btn-sm" href="<?= site_url('login') ?>">Login</a>
+            <?php endif; ?>
         </div>
     </div>
 </nav>
