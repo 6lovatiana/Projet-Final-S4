@@ -473,9 +473,9 @@ app/Views/operateur/_flash.php      (partial messages succes/erreur, reutilise p
 
 ---
 
-## Lot 2 — Côté Client
+## Lot 2 — Côté Client ✅ Termine
 
-**Fichiers à créer (propres à ce lot, aucun croisement avec le Lot 1) :**
+**Fichiers créés (propres à ce lot, aucun croisement avec le Lot 1) :**
 
 ```
 app/Models/ClientModel.php
@@ -491,35 +491,757 @@ app/Views/client/transfert.php
 app/Views/client/historique.php
 ```
 
-**Checklist :**
+**Checklist et code :**
 
-- [ ] `ClientModel` — CRUD sur `clients` (`id`, `numero`, `solde`)
-- [ ] `AuthController::login()` — GET, formulaire de saisie du numéro
-- [ ] `AuthController::attempt()` — POST `login`, vérifie le préfixe (table `prefixes`,
-      en lecture seule), crée le client s'il n'existe pas encore (login auto, aucune
-      inscription), stocke `client_id` en session, redirige vers `client`
-- [ ] `AuthController::logout()` — GET, détruit la session, redirige vers `/`
-- [ ] `ClientAuthFilter` — protège les routes `/client/*` (redirige vers login si pas
-      de session). Une fois créé, l'activer dans `Routes.php` en changeant :
-      `$routes->group('client', static function ($routes) {...})` en
-      `$routes->group('client', ['filter' => 'clientAuth'], static function ($routes) {...})`
-      et enregistrer l'alias `'clientAuth' => \App\Filters\ClientAuthFilter::class`
-      dans `app/Config/Filters.php` (`$aliases`)
-- [ ] `TransactionModel::calculerFrais()` — lit le barème dans `frais` (lecture seule,
-      la table est deja remplie par le Lot 1 ou par `base.sql`), voir l'exemple de code
-      dans [GUIDE_TECHNIQUE.md §5](GUIDE_TECHNIQUE.md#5-extrait-de-code-cle--calcul-automatique-des-frais)
-- [ ] `ClientController::dashboard()` — GET `client`, affiche le solde du client connecté
-- [ ] `ClientController::depot()` / `storeDepot()` — GET formulaire / POST `client/depot`,
+- [x] `ClientModel` — CRUD sur `clients` (`id`, `numero`, `solde`), validation integree
+      (numero unique, solde decimal) + `findByNumero()`
+
+  `app/Models/ClientModel.php`
+  ```php
+  <?php
+
+  namespace App\Models;
+
+  use CodeIgniter\Model;
+
+  class ClientModel extends Model
+  {
+      protected $table         = 'clients';
+      protected $primaryKey    = 'id';
+      protected $returnType    = 'object';
+      protected $useTimestamps = true;
+      protected $createdField  = 'created_at';
+      protected $updatedField  = 'updated_at';
+
+      protected $allowedFields = [
+          'numero',
+          'solde',
+      ];
+
+      protected $validationRules = [
+          'numero' => 'required|is_unique[clients.numero,id]',
+          'solde'  => 'required|decimal',
+      ];
+
+      protected $validationMessages = [
+          'numero' => [
+              'required'  => 'Le numero de telephone est obligatoire.',
+              'is_unique' => 'Ce numero de telephone est deja utilise.',
+          ],
+          'solde' => [
+              'required' => 'Le solde est obligatoire.',
+              'decimal'  => 'Le solde doit etre un nombre decimal.',
+          ],
+      ];
+
+
+      public function findByNumero(string $numero): ?object
+      {
+          return $this->where('numero', $numero)->first();
+      }
+  }
+  ```
+
+- [x] `AuthController::login()` — GET, formulaire de saisie du numéro
+- [x] `AuthController::attempt()` — POST `login`, vérifie le préfixe (table `prefixes`,
+      en lecture seule via `db_connect()`), crée le client s'il n'existe pas encore
+      (login auto, aucune inscription), stocke `client_id` en session, redirige vers `client`
+- [x] `AuthController::logout()` — GET, détruit la session, redirige vers `/`
+
+  `app/Controllers/AuthController.php`
+  ```php
+  <?php
+
+  namespace App\Controllers;
+
+  use App\Models\ClientModel;
+
+  class AuthController extends BaseController
+  {
+      /**
+       * GET /login — Affiche le formulaire de saisie du numero.
+       */
+      public function login(): string
+      {
+          return view('auth/login');
+      }
+
+      /**
+       * POST /login — Verifie le prefixe, cree le client si necessaire,
+       *               stocke l'id en session, redirige vers client/.
+       */
+      public function attempt()
+      {
+          $numero = trim($this->request->getPost('numero') ?? '');
+
+          if ($numero === '') {
+              return redirect()->back()->withInput()->with('error', 'Veuillez saisir un numero de telephone.');
+          }
+
+          $prefixe = substr($numero, 0, 3);
+
+          $prefixeValide = db_connect()->table('prefixes')
+              ->where('prefixe', $prefixe)
+              ->countAllResults() > 0;
+
+          if (! $prefixeValide) {
+              return redirect()->back()->withInput()->with('error', 'Le prefixe "' . esc($prefixe) . '" n\'est pas valable.');
+          }
+
+          $clientModel = new ClientModel();
+          $client = $clientModel->findByNumero($numero);
+
+          if ($client === null) {
+              $clientModel->insert([
+                  'numero' => $numero,
+                  'solde'  => 0,
+              ]);
+              $client = $clientModel->findByNumero($numero);
+          }
+
+          session()->set('client_id', $client->id);
+
+          return redirect()->to(site_url('client'));
+      }
+
+      /**
+       * GET /logout — Detruit la session et redirige vers l'accueil.
+       */
+      public function logout()
+      {
+          session()->destroy();
+
+          return redirect()->to(site_url('/'));
+      }
+  }
+  ```
+
+- [x] `ClientAuthFilter` — protège les routes `/client/*` (redirige vers login si pas
+      de session), activé dans `Routes.php`
+      (`$routes->group('client', ['filter' => 'clientAuth'], ...)`) et enregistré dans
+      `app/Config/Filters.php` (`'clientAuth' => \App\Filters\ClientAuthFilter::class`)
+
+  `app/Filters/ClientAuthFilter.php`
+  ```php
+  <?php
+
+  namespace App\Filters;
+
+  use CodeIgniter\Filters\FilterInterface;
+  use CodeIgniter\HTTP\RequestInterface;
+  use CodeIgniter\HTTP\ResponseInterface;
+
+  class ClientAuthFilter implements FilterInterface
+  {
+      /**
+       * Verifie que le client est connecte avant d'acceder aux routes protegees.
+       */
+      public function before(RequestInterface $request, $arguments = null)
+      {
+          if (! session()->get('client_id')) {
+              return redirect()->to(site_url('login'));
+          }
+      }
+
+      /**
+       * Aucune action apres la requete.
+       */
+      public function after(RequestInterface $request, ResponseInterface $response, $arguments = null)
+      {
+      }
+  }
+  ```
+
+- [x] `TransactionModel::calculerFrais()` — lit le barème dans `frais` (lecture seule),
+      voir aussi l'exemple de code dans
+      [GUIDE_TECHNIQUE.md §5](GUIDE_TECHNIQUE.md#5-extrait-de-code-cle--calcul-automatique-des-frais).
+      `depot()` / `retrait()` / `transfert()` encapsulent chacune la mise a jour du/des
+      solde(s) + l'insertion dans `transactions` dans une transaction SQL
+      (`transStart()`/`transComplete()`), avec verification du solde et `throw` en cas
+      de solde insuffisant. `getHistorique()` liste les operations d'un client.
+
+  `app/Models/TransactionModel.php`
+  ```php
+  <?php
+
+  namespace App\Models;
+
+  use CodeIgniter\Model;
+
+  class TransactionModel extends Model
+  {
+      protected $table      = 'transactions';
+      protected $returnType = 'object';
+
+      protected $allowedFields = [
+          'type_operation_id',
+          'client_id',
+          'client_destination_id',
+          'montant',
+          'frais',
+          'solde_avant',
+          'solde_apres',
+      ];
+
+      /**
+       * Lit le bareme dans la table `frais` pour un type d'operation et un montant donnes.
+       */
+      public function calculerFrais(int $typeOperationId, float $montant): float
+      {
+          $bareme = $this->db->table('frais')
+              ->where('type_operation_id', $typeOperationId)
+              ->where('min <=', $montant)
+              ->where('max >=', $montant)
+              ->get()
+              ->getRow();
+
+          return $bareme->valeur ?? 0.0;
+      }
+
+      /**
+       * Depot : crédite le solde, frais = 0, journalise l'operation.
+       */
+      public function depot(int $clientId, float $montant): array
+      {
+          $clientModel = model(ClientModel::class);
+
+          $this->db->transStart();
+
+          $client     = $clientModel->find($clientId);
+          $soldeApres = $client->solde + $montant;
+
+          $clientModel->update($clientId, ['solde' => $soldeApres]);
+
+          $this->insert([
+              'type_operation_id' => $this->getCodeId('depot'),
+              'client_id'         => $clientId,
+              'montant'           => $montant,
+              'frais'             => 0.0,
+              'solde_avant'       => $client->solde,
+              'solde_apres'       => $soldeApres,
+          ]);
+
+          $this->db->transComplete();
+
+          return ['frais' => 0.0, 'solde' => $soldeApres];
+      }
+
+      /**
+       * Retrait : vérifie le solde, débite, journalise l'operation.
+       */
+      public function retrait(int $clientId, float $montant): array
+      {
+          $clientModel = model(ClientModel::class);
+
+          $this->db->transStart();
+
+          $client = $clientModel->find($clientId);
+          $typeId = $this->getCodeId('retrait');
+          $frais  = $this->calculerFrais($typeId, $montant);
+          $total  = $montant + $frais;
+
+          if ($client->solde < $total) {
+              $this->db->transRollback();
+              throw new \RuntimeException('Solde insuffisant.');
+          }
+
+          $soldeApres = $client->solde - $total;
+
+          $clientModel->update($clientId, ['solde' => $soldeApres]);
+
+          $this->insert([
+              'type_operation_id' => $typeId,
+              'client_id'         => $clientId,
+              'montant'           => $montant,
+              'frais'             => $frais,
+              'solde_avant'       => $client->solde,
+              'solde_apres'       => $soldeApres,
+          ]);
+
+          $this->db->transComplete();
+
+          return ['frais' => $frais, 'solde' => $soldeApres];
+      }
+
+      /**
+       * Transfert : vérifie le solde de l'émetteur, débite, crédite le destinataire,
+       * journalise l'operation.
+       */
+      public function transfert(int $clientId, int $clientDestinationId, float $montant): array
+      {
+          $clientModel = model(ClientModel::class);
+
+          $this->db->transStart();
+
+          $emetteur    = $clientModel->find($clientId);
+          $destinataire = $clientModel->find($clientDestinationId);
+          $typeId      = $this->getCodeId('transfert');
+          $frais       = $this->calculerFrais($typeId, $montant);
+          $total       = $montant + $frais;
+
+          if ($emetteur->solde < $total) {
+              $this->db->transRollback();
+              throw new \RuntimeException('Solde insuffisant pour le transfert.');
+          }
+
+          $soldeEmetteur    = $emetteur->solde - $total;
+          $soldeDestinataire = $destinataire->solde + $montant;
+
+          $clientModel->update($clientId, ['solde' => $soldeEmetteur]);
+          $clientModel->update($clientDestinationId, ['solde' => $soldeDestinataire]);
+
+          $this->insert([
+              'type_operation_id'       => $typeId,
+              'client_id'               => $clientId,
+              'client_destination_id'   => $clientDestinationId,
+              'montant'                 => $montant,
+              'frais'                   => $frais,
+              'solde_avant'             => $emetteur->solde,
+              'solde_apres'             => $soldeEmetteur,
+          ]);
+
+          $this->db->transComplete();
+
+          return ['frais' => $frais, 'solde' => $soldeEmetteur];
+      }
+
+      /**
+       * Retourne l'historique des transactions d'un client, de la plus récente à la plus ancienne.
+       */
+      public function getHistorique(int $clientId): array
+      {
+          return $this->select('transactions.*, types_operation.libelle AS type_libelle')
+              ->join('types_operation', 'types_operation.id = transactions.type_operation_id')
+              ->where('client_id', $clientId)
+              ->orderBy('created_at', 'DESC')
+              ->findAll();
+      }
+
+      /**
+       * Résout un code de type d'opération (depot, retrait, transfert) en son id.
+       */
+      private function getCodeId(string $code): int
+      {
+          $row = $this->db->table('types_operation')
+              ->where('code', $code)
+              ->get()
+              ->getRow();
+
+          return (int) $row->id;
+      }
+  }
+  ```
+
+- [x] `ClientController::dashboard()` — GET `client`, affiche le solde du client connecté
+- [x] `ClientController::depot()` / `storeDepot()` — GET formulaire / POST `client/depot`,
       crédite le solde, frais = 0, insère dans `transactions`
-- [ ] `ClientController::retrait()` / `storeRetrait()` — GET formulaire / POST `client/retrait`,
+- [x] `ClientController::retrait()` / `storeRetrait()` — GET formulaire / POST `client/retrait`,
       vérifie solde suffisant (montant + frais), débite, insère dans `transactions`
-- [ ] `ClientController::transfert()` / `storeTransfert()` — GET formulaire / POST `client/transfert`,
+- [x] `ClientController::transfert()` / `storeTransfert()` — GET formulaire / POST `client/transfert`,
       vérifie solde suffisant, débite l'émetteur, crédite le destinataire
       (`client_destination_id`), insère dans `transactions`
-- [ ] `ClientController::historique()` — GET `client/historique`, liste des `transactions`
+- [x] `ClientController::historique()` — GET `client/historique`, liste des `transactions`
       du client connecté
-- [ ] Vues Bootstrap (formulaires + tableaux) qui étendent `layouts/main` :
-      `<?= $this->extend('layouts/main') ?>` / `<?= $this->section('content') ?>` / `<?= $this->endSection() ?>`
+
+  `app/Controllers/ClientController.php`
+  ```php
+  <?php
+
+  namespace App\Controllers;
+
+  use App\Models\ClientModel;
+  use App\Models\TransactionModel;
+
+  class ClientController extends BaseController
+  {
+      /**
+       * ID du client connecte depuis la session.
+       */
+      private function clientId(): int
+      {
+          return (int) session()->get('client_id');
+      }
+
+      /**
+       * GET /client — Affiche le solde du client connecte.
+       */
+      public function dashboard()
+      {
+          $clientModel = new ClientModel();
+          $client = $clientModel->find($this->clientId());
+
+          return view('client/dashboard', ['client' => $client]);
+      }
+
+      /**
+       * GET /client/depot — Formulaire de depot.
+       */
+      public function depot()
+      {
+          return view('client/depot');
+      }
+
+      /**
+       * POST /client/depot — Execute le depot.
+       */
+      public function storeDepot()
+      {
+          $montant = (float) $this->request->getPost('montant');
+
+          if ($montant <= 0) {
+              return redirect()->back()->with('error', 'Le montant doit etre superieur a 0.');
+          }
+
+          $transactionModel = new TransactionModel();
+          $transactionModel->depot($this->clientId(), $montant);
+
+          return redirect()->to(site_url('client'))->with('success', 'Depot de ' . number_format($montant, 0, ',', ' ') . ' effectue.');
+      }
+
+      /**
+       * GET /client/retrait — Formulaire de retrait.
+       */
+      public function retrait()
+      {
+          return view('client/retrait');
+      }
+
+      /**
+       * POST /client/retrait — Execute le retrait.
+       */
+      public function storeRetrait()
+      {
+          $montant = (float) $this->request->getPost('montant');
+
+          if ($montant <= 0) {
+              return redirect()->back()->with('error', 'Le montant doit etre superieur a 0.');
+          }
+
+          $transactionModel = new TransactionModel();
+
+          try {
+              $resultat = $transactionModel->retrait($this->clientId(), $montant);
+          } catch (\RuntimeException $e) {
+              return redirect()->back()->with('error', $e->getMessage());
+          }
+
+          return redirect()->to(site_url('client'))->with(
+              'success',
+              'Retrait de ' . number_format($montant, 0, ',', ' ') . ' effectue (frais : ' . number_format($resultat['frais'], 0, ',', ' ') . ').'
+          );
+      }
+
+      /**
+       * GET /client/transfert — Formulaire de transfert.
+       */
+      public function transfert()
+      {
+          return view('client/transfert');
+      }
+
+      /**
+       * POST /client/transfert — Execute le transfert.
+       */
+      public function storeTransfert()
+      {
+          $destinataire = trim($this->request->getPost('destinataire') ?? '');
+          $montant      = (float) $this->request->getPost('montant');
+
+          if ($destinataire === '') {
+              return redirect()->back()->with('error', 'Veuillez saisir le numero du destinataire.');
+          }
+
+          if ($montant <= 0) {
+              return redirect()->back()->with('error', 'Le montant doit etre superieur a 0.');
+          }
+
+          $clientModel = new ClientModel();
+          $dest = $clientModel->findByNumero($destinataire);
+
+          if ($dest === null) {
+              return redirect()->back()->with('error', 'Le numero "' . esc($destinataire) . '" est introuvable.');
+          }
+
+          if ((int) $dest->id === $this->clientId()) {
+              return redirect()->back()->with('error', 'Vous ne pouvez pas vous transférer a vous-meme.');
+          }
+
+          $transactionModel = new TransactionModel();
+
+          try {
+              $resultat = $transactionModel->transfert($this->clientId(), (int) $dest->id, $montant);
+          } catch (\RuntimeException $e) {
+              return redirect()->back()->with('error', $e->getMessage());
+          }
+
+          return redirect()->to(site_url('client'))->with(
+              'success',
+              'Transfert de ' . number_format($montant, 0, ',', ' ') . ' effectue (frais : ' . number_format($resultat['frais'], 0, ',', ' ') . ').'
+          );
+      }
+
+      /**
+       * GET /client/historique — Liste des operations du client.
+       */
+      public function historique()
+      {
+          $transactionModel = new TransactionModel();
+          $transactions = $transactionModel->getHistorique($this->clientId());
+
+          return view('client/historique', ['transactions' => $transactions]);
+      }
+  }
+  ```
+
+- [x] Vues Bootstrap (formulaires + tableaux) qui étendent `layouts/main`, testées en HTTP
+      (login → dépôt → retrait → transfert → historique vérifiés de bout en bout, calcul
+      des frais correct)
+
+  `app/Views/auth/login.php`
+  ```php
+  <?= $this->extend('layouts/main') ?>
+
+  <?= $this->section('content') ?>
+  <div class="d-flex flex-column justify-content-center align-items-center" style="min-height: 60vh;">
+      <div class="card shadow-sm" style="max-width: 400px; width: 100%;">
+          <div class="card-body p-4">
+              <h1 class="h4 mb-3 text-center">Connexion</h1>
+
+              <?php $error = session()->getFlashdata('error'); ?>
+              <?php if ($error): ?>
+                  <div class="alert alert-danger"><?= esc($error) ?></div>
+              <?php endif; ?>
+
+              <form method="post" action="<?= site_url('login') ?>">
+                  <div class="mb-3">
+                      <label for="numero" class="form-label">Numero de telephone</label>
+                      <input
+                          type="text"
+                          class="form-control"
+                          id="numero"
+                          name="numero"
+                          placeholder="Ex : 0331234567"
+                          value="<?= esc(old('numero')) ?>"
+                          required
+                      >
+                  </div>
+                  <button type="submit" class="btn btn-primary w-100">Se connecter</button>
+              </form>
+          </div>
+      </div>
+  </div>
+  <?= $this->endSection() ?>
+  ```
+
+  `app/Views/client/dashboard.php`
+  ```php
+  <?= $this->extend('layouts/main') ?>
+
+  <?= $this->section('content') ?>
+  <div class="row justify-content-center">
+      <div class="col-md-6">
+
+          <?php $success = session()->getFlashdata('success'); ?>
+          <?php if ($success): ?>
+              <div class="alert alert-success"><?= esc($success) ?></div>
+          <?php endif; ?>
+
+          <div class="card shadow-sm">
+              <div class="card-body text-center p-4">
+                  <h1 class="h4 mb-3">Mon solde</h1>
+                  <p class="text-muted">Numero : <?= esc($client->numero) ?></p>
+                  <p class="display-5 fw-bold text-success">
+                      <?= number_format($client->solde, 2, ',', ' ') ?> Ar
+                  </p>
+              </div>
+          </div>
+
+      </div>
+  </div>
+  <?= $this->endSection() ?>
+  ```
+
+  `app/Views/client/depot.php`
+  ```php
+  <?= $this->extend('layouts/main') ?>
+
+  <?= $this->section('content') ?>
+  <div class="row justify-content-center">
+      <div class="col-md-6">
+
+          <?php $error = session()->getFlashdata('error'); ?>
+          <?php if ($error): ?>
+              <div class="alert alert-danger"><?= esc($error) ?></div>
+          <?php endif; ?>
+
+          <div class="card shadow-sm">
+              <div class="card-body p-4">
+                  <h1 class="h4 mb-3">Depot</h1>
+                  <form method="post" action="<?= site_url('client/depot') ?>">
+                      <?= csrf_field() ?>
+                      <div class="mb-3">
+                          <label for="montant" class="form-label">Montant (Ar)</label>
+                          <input
+                              type="number"
+                              class="form-control"
+                              id="montant"
+                              name="montant"
+                              min="1"
+                              step="1"
+                              placeholder="Ex : 5000"
+                              value="<?= esc(old('montant')) ?>"
+                              required
+                          >
+                      </div>
+                      <button type="submit" class="btn btn-success w-100">Deposer</button>
+                  </form>
+              </div>
+          </div>
+
+      </div>
+  </div>
+  <?= $this->endSection() ?>
+  ```
+
+  `app/Views/client/retrait.php`
+  ```php
+  <?= $this->extend('layouts/main') ?>
+
+  <?= $this->section('content') ?>
+  <div class="row justify-content-center">
+      <div class="col-md-6">
+
+          <?php $error = session()->getFlashdata('error'); ?>
+          <?php if ($error): ?>
+              <div class="alert alert-danger"><?= esc($error) ?></div>
+          <?php endif; ?>
+
+          <div class="card shadow-sm">
+              <div class="card-body p-4">
+                  <h1 class="h4 mb-3">Retrait</h1>
+                  <form method="post" action="<?= site_url('client/retrait') ?>">
+                      <?= csrf_field() ?>
+                      <div class="mb-3">
+                          <label for="montant" class="form-label">Montant (Ar)</label>
+                          <input
+                              type="number"
+                              class="form-control"
+                              id="montant"
+                              name="montant"
+                              min="1"
+                              step="1"
+                              placeholder="Ex : 5000"
+                              value="<?= esc(old('montant')) ?>"
+                              required
+                          >
+                      </div>
+                      <button type="submit" class="btn btn-warning w-100">Retirer</button>
+                  </form>
+              </div>
+          </div>
+
+      </div>
+  </div>
+  <?= $this->endSection() ?>
+  ```
+
+  `app/Views/client/transfert.php`
+  ```php
+  <?= $this->extend('layouts/main') ?>
+
+  <?= $this->section('content') ?>
+  <div class="row justify-content-center">
+      <div class="col-md-6">
+
+          <?php $error = session()->getFlashdata('error'); ?>
+          <?php if ($error): ?>
+              <div class="alert alert-danger"><?= esc($error) ?></div>
+          <?php endif; ?>
+
+          <div class="card shadow-sm">
+              <div class="card-body p-4">
+                  <h1 class="h4 mb-3">Transfert</h1>
+                  <form method="post" action="<?= site_url('client/transfert') ?>">
+                      <?= csrf_field() ?>
+                      <div class="mb-3">
+                          <label for="destinataire" class="form-label">Numero du destinataire</label>
+                          <input
+                              type="text"
+                              class="form-control"
+                              id="destinataire"
+                              name="destinataire"
+                              placeholder="Ex : 0331234567"
+                              value="<?= esc(old('destinataire')) ?>"
+                              required
+                          >
+                      </div>
+                      <div class="mb-3">
+                          <label for="montant" class="form-label">Montant (Ar)</label>
+                          <input
+                              type="number"
+                              class="form-control"
+                              id="montant"
+                              name="montant"
+                              min="1"
+                              step="1"
+                              placeholder="Ex : 5000"
+                              value="<?= esc(old('montant')) ?>"
+                              required
+                          >
+                      </div>
+                      <button type="submit" class="btn btn-primary w-100">Transférer</button>
+                  </form>
+              </div>
+          </div>
+
+      </div>
+  </div>
+  <?= $this->endSection() ?>
+  ```
+
+  `app/Views/client/historique.php`
+  ```php
+  <?= $this->extend('layouts/main') ?>
+
+  <?= $this->section('content') ?>
+  <div class="row justify-content-center">
+      <div class="col-md-10">
+          <h1 class="h4 mb-3">Historique des operations</h1>
+
+          <?php if (empty($transactions)): ?>
+              <div class="alert alert-info">Aucune transaction.</div>
+          <?php else: ?>
+              <div class="table-responsive">
+                  <table class="table table-striped table-hover">
+                      <thead class="table-dark">
+                          <tr>
+                              <th>Date</th>
+                              <th>Type</th>
+                              <th class="text-end">Montant</th>
+                              <th class="text-end">Frais</th>
+                              <th class="text-end">Solde avant</th>
+                              <th class="text-end">Solde apres</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          <?php foreach ($transactions as $t): ?>
+                              <tr>
+                                  <td><?= esc($t->created_at) ?></td>
+                                  <td><?= esc($t->type_libelle) ?></td>
+                                  <td class="text-end"><?= number_format($t->montant, 2, ',', ' ') ?></td>
+                                  <td class="text-end"><?= number_format($t->frais, 2, ',', ' ') ?></td>
+                                  <td class="text-end"><?= number_format($t->solde_avant, 2, ',', ' ') ?></td>
+                                  <td class="text-end"><?= number_format($t->solde_apres, 2, ',', ' ') ?></td>
+                              </tr>
+                          <?php endforeach; ?>
+                      </tbody>
+                  </table>
+              </div>
+          <?php endif; ?>
+      </div>
+  </div>
+  <?= $this->endSection() ?>
+  ```
 
 ---
 
@@ -546,7 +1268,9 @@ s partagés déjà faits)
 
 ## Definition of Done — V1
 
-- [ ] Les deux lots fusionnés dans `main`
-- [ ] Parcours complet testable : login par numéro → dépôt → retrait → transfert →
-      historique (côté client) + consultation gains/comptes (côté opérateur)
+- [x] Les deux lots fusionnés dans `dev` (PR #5/#6/#7)
+- [x] Parcours complet testable : login par numéro → dépôt → retrait → transfert →
+      historique (côté client) + consultation gains/comptes (côté opérateur) — vérifié
+      de bout en bout en HTTP, calcul des frais correct
+- [ ] Fusion de `dev` vers `main`
 - [ ] Tag Git `v1` posé sur `main`
