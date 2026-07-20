@@ -34,7 +34,7 @@ $routes->group('operateur', static function ($routes): void {
 // cree et enregistre dans app/Config/Filters.php, ex:
 // $routes->group('client', ['filter' => 'clientAuth'], static function ($routes) { ... });
 // --------------------------------------------------------------------
-$routes->group('client', static function ($routes): void {
+$routes->group('client', ['filter' => 'clientAuth'], static function ($routes): void {
     $routes->get('/', 'ClientController::dashboard');
 
     $routes->get('depot', 'ClientController::depot');
