@@ -1,38 +1,27 @@
-# TODO V1 — Répartition du travail (binôme)
+# TODO V1 — Répartition du travail (binôme:ETU004311; ETU003968)
 
-Base commune déjà en place, à ne pas retoucher : schéma DB ([base.sql](base.sql)),
-`.env` (SQLite), squelette CI4 nettoyé, **routes** (`app/Config/Routes.php`), **layout**
-Bootstrap commun (`app/Views/layouts/main.php`) et helpers CI4 (`form`, `url`) actives
-dans `app/Controllers/BaseController.php`. Détails techniques complets :
-[GUIDE_TECHNIQUE.md](GUIDE_TECHNIQUE.md).
-
-Toutes les routes des deux lots sont déjà déclarées dans `Routes.php` (vérifiable avec
-`php spark routes`) et pointent vers des controllers/methodes qui n'existent pas encore
-— normal, chaque lot doit juste créer le controller avec exactement les noms de methode
-utilises dans les routes ci-dessous. Tant qu'un controller n'existe pas, sa route renvoie
-une 404 (déjà vérifié), ça ne casse rien pour l'autre lot.
 
 ## Principe d'organisation
 
-Le travail est coupé en 2 lots **independants** qui ne touchent quasiment jamais les
-memes fichiers, pour eviter les conflits git :
 
-- **Lot 1 — Côté Opérateur** (admin/back-office)
-- **Lot 2 — Côté Client** (login + opérations)
+- **Branche:dev_misaina_login_auto 
+— Côté Opérateur** (admin/back-office)
+- **Brache:dev_toavina_client 
+— Côté Client** (login + opérations)
 
 Chacun lit dans les memes tables (`clients`, `prefixes`, `types_operation`, `frais`,
 `transactions`), deja creees par `base.sql` — aucun besoin de se coordonner sur le
 schema, il est fige.
 
 Workflow git suggere :
-- Une branche par lot (ex: `feature/operateur`, `feature/client`), partant de `main` a jour
-- Chacun push sa branche + PR vers `main` quand sa partie est testee
+- Une branche par partie (ex: `feature/operateur`, `feature/client`), partant de `main` a jour
+- Chacun push sa branche + PR vers `dev` quand sa partie est testee
 - Seuls `app/Config/Routes.php` et `app/Views/layouts/main.php` sont partages (voir
   section Coordination) : petits fichiers, conflits faciles a resoudre a la main
 
 ---
 
-## Lot 1 — Côté Opérateur ✅ Termine
+## Lot 1 — Côté Opérateur  Termine
 
 **Fichiers créés (propres à ce lot, aucun croisement avec le Lot 2) :**
 
@@ -110,9 +99,8 @@ app/Views/operateur/_flash.php      (partial messages succes/erreur, reutilise p
       protected $allowedFields = ['type_operation_id', 'min', 'max', 'valeur'];
       protected $useTimestamps = false;
 
-      /**
-       * Bareme de frais d'un type d'operation, tri par tranche croissante.
-       */
+       /** tri croissant **/
+
       public function pourType(int $typeOperationId): array
       {
           return $this->where('type_operation_id', $typeOperationId)
@@ -153,9 +141,7 @@ app/Views/operateur/_flash.php      (partial messages succes/erreur, reutilise p
           $this->fraisModel         = new FraisModel();
       }
 
-      // ------------------------------------------------------------------
-      // Prefixes
-      // ------------------------------------------------------------------
+     
 
       public function prefixes()
       {
@@ -186,9 +172,7 @@ app/Views/operateur/_flash.php      (partial messages succes/erreur, reutilise p
           return redirect()->to('operateur/prefixes')->with('success', 'Prefixe supprime.');
       }
 
-      // ------------------------------------------------------------------
-      // Types d'operation & bareme de frais
-      // ------------------------------------------------------------------
+      
 
       public function typesOperation()
       {
@@ -223,12 +207,7 @@ app/Views/operateur/_flash.php      (partial messages succes/erreur, reutilise p
           return redirect()->to('operateur/types-operation')->with('success', 'Bareme mis a jour.');
       }
 
-      // ------------------------------------------------------------------
-      // Situation des comptes clients
-      // Lecture seule sur `clients` (table geree par le Lot 2, pas de Model
-      // partage ici pour ne pas empieter sur ClientModel.php du Lot 2).
-      // ------------------------------------------------------------------
-
+      
       public function comptes()
       {
           $clients = Database::connect()->table('clients')
@@ -239,10 +218,7 @@ app/Views/operateur/_flash.php      (partial messages succes/erreur, reutilise p
           return view('operateur/comptes', ['clients' => $clients]);
       }
 
-      // ------------------------------------------------------------------
-      // Situation des gains via les frais (retrait / transfert)
-      // Lecture seule sur `transactions` (table geree par le Lot 2).
-      // ------------------------------------------------------------------
+      
 
       public function gains()
       {
@@ -558,18 +534,13 @@ app/Views/client/historique.php
 
   class AuthController extends BaseController
   {
-      /**
-       * GET /login — Affiche le formulaire de saisie du numero.
-       */
+      
       public function login(): string
       {
           return view('auth/login');
       }
 
-      /**
-       * POST /login — Verifie le prefixe, cree le client si necessaire,
-       *               stocke l'id en session, redirige vers client/.
-       */
+      
       public function attempt()
       {
           $numero = trim($this->request->getPost('numero') ?? '');
@@ -604,9 +575,7 @@ app/Views/client/historique.php
           return redirect()->to(site_url('client'));
       }
 
-      /**
-       * GET /logout — Detruit la session et redirige vers l'accueil.
-       */
+      
       public function logout()
       {
           session()->destroy();
@@ -633,9 +602,7 @@ app/Views/client/historique.php
 
   class ClientAuthFilter implements FilterInterface
   {
-      /**
-       * Verifie que le client est connecte avant d'acceder aux routes protegees.
-       */
+     
       public function before(RequestInterface $request, $arguments = null)
       {
           if (! session()->get('client_id')) {
@@ -683,9 +650,7 @@ app/Views/client/historique.php
           'solde_apres',
       ];
 
-      /**
-       * Lit le bareme dans la table `frais` pour un type d'operation et un montant donnes.
-       */
+      
       public function calculerFrais(int $typeOperationId, float $montant): float
       {
           $bareme = $this->db->table('frais')
@@ -698,9 +663,7 @@ app/Views/client/historique.php
           return $bareme->valeur ?? 0.0;
       }
 
-      /**
-       * Depot : crédite le solde, frais = 0, journalise l'operation.
-       */
+      
       public function depot(int $clientId, float $montant): array
       {
           $clientModel = model(ClientModel::class);
@@ -726,9 +689,7 @@ app/Views/client/historique.php
           return ['frais' => 0.0, 'solde' => $soldeApres];
       }
 
-      /**
-       * Retrait : vérifie le solde, débite, journalise l'operation.
-       */
+      
       public function retrait(int $clientId, float $montant): array
       {
           $clientModel = model(ClientModel::class);
@@ -763,10 +724,7 @@ app/Views/client/historique.php
           return ['frais' => $frais, 'solde' => $soldeApres];
       }
 
-      /**
-       * Transfert : vérifie le solde de l'émetteur, débite, crédite le destinataire,
-       * journalise l'operation.
-       */
+      
       public function transfert(int $clientId, int $clientDestinationId, float $montant): array
       {
           $clientModel = model(ClientModel::class);
@@ -805,9 +763,7 @@ app/Views/client/historique.php
           return ['frais' => $frais, 'solde' => $soldeEmetteur];
       }
 
-      /**
-       * Retourne l'historique des transactions d'un client, de la plus récente à la plus ancienne.
-       */
+      
       public function getHistorique(int $clientId): array
       {
           return $this->select('transactions.*, types_operation.libelle AS type_libelle')
@@ -817,9 +773,7 @@ app/Views/client/historique.php
               ->findAll();
       }
 
-      /**
-       * Résout un code de type d'opération (depot, retrait, transfert) en son id.
-       */
+      
       private function getCodeId(string $code): int
       {
           $row = $this->db->table('types_operation')
@@ -854,17 +808,13 @@ app/Views/client/historique.php
 
   class ClientController extends BaseController
   {
-      /**
-       * ID du client connecte depuis la session.
-       */
+      
       private function clientId(): int
       {
           return (int) session()->get('client_id');
       }
 
-      /**
-       * GET /client — Affiche le solde du client connecte.
-       */
+      
       public function dashboard()
       {
           $clientModel = new ClientModel();
@@ -873,17 +823,13 @@ app/Views/client/historique.php
           return view('client/dashboard', ['client' => $client]);
       }
 
-      /**
-       * GET /client/depot — Formulaire de depot.
-       */
+      
       public function depot()
       {
           return view('client/depot');
       }
 
-      /**
-       * POST /client/depot — Execute le depot.
-       */
+      
       public function storeDepot()
       {
           $montant = (float) $this->request->getPost('montant');
@@ -898,17 +844,13 @@ app/Views/client/historique.php
           return redirect()->to(site_url('client'))->with('success', 'Depot de ' . number_format($montant, 0, ',', ' ') . ' effectue.');
       }
 
-      /**
-       * GET /client/retrait — Formulaire de retrait.
-       */
+      
       public function retrait()
       {
           return view('client/retrait');
       }
 
-      /**
-       * POST /client/retrait — Execute le retrait.
-       */
+      
       public function storeRetrait()
       {
           $montant = (float) $this->request->getPost('montant');
@@ -931,17 +873,13 @@ app/Views/client/historique.php
           );
       }
 
-      /**
-       * GET /client/transfert — Formulaire de transfert.
-       */
+      
       public function transfert()
       {
           return view('client/transfert');
       }
 
-      /**
-       * POST /client/transfert — Execute le transfert.
-       */
+      
       public function storeTransfert()
       {
           $destinataire = trim($this->request->getPost('destinataire') ?? '');
@@ -980,9 +918,7 @@ app/Views/client/historique.php
           );
       }
 
-      /**
-       * GET /client/historique — Liste des operations du client.
-       */
+      
       public function historique()
       {
           $transactionModel = new TransactionModel();
@@ -1265,12 +1201,3 @@ s partagés déjà faits)
   tous les controllers (utilisables directement : `site_url()`, `form_open()`, etc.)
 - **`app/Config/App.php`** — `indexPage` vidé pour des URLs propres (`/client` au lieu
   de `/index.php/client`)
-
-## Definition of Done — V1
-
-- [x] Les deux lots fusionnés dans `dev` (PR #5/#6/#7)
-- [x] Parcours complet testable : login par numéro → dépôt → retrait → transfert →
-      historique (côté client) + consultation gains/comptes (côté opérateur) — vérifié
-      de bout en bout en HTTP, calcul des frais correct
-- [ ] Fusion de `dev` vers `main`
-- [ ] Tag Git `v1` posé sur `main`
