@@ -13,8 +13,11 @@ class TransactionModel extends Model
         'type_operation_id',
         'client_id',
         'client_destination_id',
+        'numero_externe',
         'montant',
         'frais',
+        'commission',
+        'frais_retrait_inclus',
         'solde_avant',
         'solde_apres',
     ];
@@ -100,45 +103,123 @@ class TransactionModel extends Model
     }
 
     /**
-     * Transfert : vérifie le solde de l'émetteur, débite, crédite le destinataire,
-     * journalise l'operation.
+     * Transfert : vers un client existant (interne) ou vers un numero dont le
+     * prefixe est reconnu comme appartenant a un "autre" operateur (externe -
+     * pas de compte chez nous, juste une commission due a cet operateur).
+     *
+     * Si $inclureFraisRetrait est vrai, le destinataire recoit
+     * montant + frais_de_retrait_estime (pour qu'apres son propre retrait, il
+     * lui reste exactement le montant initialement voulu par l'emetteur).
+     *
+     * Debit emetteur = montant_credite (destinataire) + frais (notre gain)
+     *                  + commission (due a l'autre operateur, externe uniquement)
      */
-    public function transfert(int $clientId, int $clientDestinationId, float $montant): array
+    public function transfert(int $clientId, string $numeroDestinataire, float $montantSaisi, bool $inclureFraisRetrait = false): array
     {
-        $clientModel = model(ClientModel::class);
+        $clientModel  = model(ClientModel::class);
+        $prefixeModel = model(PrefixeModel::class);
+
+        $destinataire          = $clientModel->findByNumero($numeroDestinataire);
+        $estExterne            = $destinataire === null;
+        $pourcentageCommission = 0.0;
+
+        if ($estExterne) {
+            $prefixeExterne = $prefixeModel->findAutrePrefixe($numeroDestinataire);
+
+            if ($prefixeExterne === null) {
+                throw new \RuntimeException('Numero ou prefixe non reconnu.');
+            }
+
+            $pourcentageCommission = (float) $prefixeExterne['pourcentage_commission'];
+        }
 
         $this->db->transStart();
 
-        $emetteur    = $clientModel->find($clientId);
-        $destinataire = $clientModel->find($clientDestinationId);
-        $typeId      = $this->getCodeId('transfert');
-        $frais       = $this->calculerFrais($typeId, $montant);
-        $total       = $montant + $frais;
+        $emetteur = $clientModel->find($clientId);
+        $typeId   = $this->getCodeId('transfert');
 
-        if ($emetteur->solde < $total) {
+        $fraisRetraitInclus = $inclureFraisRetrait
+            ? $this->calculerFrais($this->getCodeId('retrait'), $montantSaisi)
+            : 0.0;
+
+        $montantCredite = $montantSaisi + $fraisRetraitInclus;
+        $fraisTransfert = $this->calculerFrais($typeId, $montantSaisi);
+        $commission     = $estExterne ? round($montantSaisi * $pourcentageCommission / 100, 2) : 0.0;
+
+        $totalDebit = $montantCredite + $fraisTransfert + $commission;
+
+        if ($emetteur->solde < $totalDebit) {
             $this->db->transRollback();
             throw new \RuntimeException('Solde insuffisant pour le transfert.');
         }
 
-        $soldeEmetteur    = $emetteur->solde - $total;
-        $soldeDestinataire = $destinataire->solde + $montant;
+        $soldeEmetteurApres = $emetteur->solde - $totalDebit;
+        $clientModel->update($clientId, ['solde' => $soldeEmetteurApres]);
 
-        $clientModel->update($clientId, ['solde' => $soldeEmetteur]);
-        $clientModel->update($clientDestinationId, ['solde' => $soldeDestinataire]);
+        if (! $estExterne) {
+            $clientModel->update($destinataire->id, ['solde' => $destinataire->solde + $montantCredite]);
+        }
 
         $this->insert([
-            'type_operation_id'       => $typeId,
-            'client_id'               => $clientId,
-            'client_destination_id'   => $clientDestinationId,
-            'montant'                 => $montant,
-            'frais'                   => $frais,
-            'solde_avant'             => $emetteur->solde,
-            'solde_apres'             => $soldeEmetteur,
+            'type_operation_id'     => $typeId,
+            'client_id'             => $clientId,
+            'client_destination_id' => $estExterne ? null : $destinataire->id,
+            'numero_externe'        => $estExterne ? $numeroDestinataire : null,
+            'montant'               => $montantCredite,
+            'frais'                 => $fraisTransfert,
+            'commission'            => $commission,
+            'frais_retrait_inclus'  => $fraisRetraitInclus,
+            'solde_avant'           => $emetteur->solde,
+            'solde_apres'           => $soldeEmetteurApres,
         ]);
 
         $this->db->transComplete();
 
-        return ['frais' => $frais, 'solde' => $soldeEmetteur];
+        return [
+            'frais'       => $fraisTransfert,
+            'commission'  => $commission,
+            'solde'       => $soldeEmetteurApres,
+            'est_externe' => $estExterne,
+        ];
+    }
+
+    /**
+     * Envoi multiple : divise $montantTotal a parts egales entre les numeros
+     * donnes (le dernier recoit le reliquat d'arrondi), chaque envoi etant un
+     * transfert independant (avec son propre frais selon le montant de sa part).
+     * L'ensemble est englobe dans une seule transaction SQL : si un envoi
+     * echoue (solde insuffisant en cours de route), tout est annule.
+     */
+    public function transfertMultiple(int $clientId, array $numeros, float $montantTotal, bool $inclureFraisRetrait = false): array
+    {
+        $nombreDestinataires = count($numeros);
+
+        if ($nombreDestinataires === 0) {
+            throw new \RuntimeException('Aucun destinataire.');
+        }
+
+        $part      = floor(($montantTotal / $nombreDestinataires) * 100) / 100;
+        $resultats = [];
+
+        $this->db->transStart();
+
+        try {
+            foreach ($numeros as $index => $numero) {
+                $montantPart = ($index === $nombreDestinataires - 1)
+                    ? round($montantTotal - ($part * ($nombreDestinataires - 1)), 2)
+                    : $part;
+
+                $resultats[] = $this->transfert($clientId, $numero, $montantPart, $inclureFraisRetrait);
+            }
+        } catch (\RuntimeException $e) {
+            $this->db->transRollback();
+
+            throw $e;
+        }
+
+        $this->db->transComplete();
+
+        return $resultats;
     }
 
     /**
