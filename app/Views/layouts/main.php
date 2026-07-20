@@ -27,6 +27,8 @@
                         <li><a class="dropdown-item" href="<?= site_url('client/historique') ?>">Historique</a></li>
                     </ul>
                 </li>
+                <?php endif; ?>
+                <?php if (session()->get('is_operateur')): ?>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Operateur</a>
                     <ul class="dropdown-menu">
@@ -38,11 +40,16 @@
                 </li>
                 <?php endif; ?>
             </ul>
-            <?php if (session()->get('client_id')): ?>
-                <a class="btn btn-outline-danger btn-sm" href="<?= site_url('logout') ?>">Logout</a>
-            <?php else: ?>
-                <a class="btn btn-outline-light btn-sm" href="<?= site_url('login') ?>">Login</a>
-            <?php endif; ?>
+            <div class="d-flex gap-2">
+                <?php if (session()->get('client_id')): ?>
+                    <a class="btn btn-outline-danger btn-sm" href="<?= site_url('logout') ?>">Logout (client)</a>
+                <?php elseif (session()->get('is_operateur')): ?>
+                    <a class="btn btn-outline-danger btn-sm" href="<?= site_url('logout') ?>">Logout (operateur)</a>
+                <?php else: ?>
+                    <a class="btn btn-outline-light btn-sm" href="<?= site_url('login') ?>">Login client</a>
+                    <a class="btn btn-outline-light btn-sm" href="<?= site_url('operateur/login') ?>">Login operateur</a>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 </nav>
