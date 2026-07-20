@@ -52,5 +52,8 @@ $routes->group('client', ['filter' => 'clientAuth'], static function ($routes): 
     $routes->get('transfert', 'ClientController::transfert');
     $routes->post('transfert', 'ClientController::storeTransfert');
 
+    $routes->get('transfert-multiple', 'ClientController::transfertMultiple');
+    $routes->post('transfert-multiple', 'ClientController::storeTransfertMultiple');
+
     $routes->get('historique', 'ClientController::historique');
 });

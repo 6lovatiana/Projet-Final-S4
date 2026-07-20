@@ -1434,52 +1434,273 @@ app/Views/layouts/main.php                 (menu Operateur conditionne par is_op
       (au lieu de `client_id` actuellement — c'est un bug herite de la V1 a corriger),
       bouton Login/Logout qui gere les 2 roles
 
-## Lot 2 — Côté Client (V2)
+## Lot 2 — Côté Client (V2) ✅ Termine
 
-**Fichiers à créer / modifier :**
+**Fichiers créés / modifiés :**
 
 ```
-app/Controllers/AuthController.php      (login() devient/reste specifique client, inchange)
-app/Controllers/Home.php                (index() devient le choix de role)
-app/Views/home.php                      (2 boutons : Client / Operateur)
-app/Models/TransactionModel.php         (transfert() reecrit selon l'algorithme V2)
-app/Controllers/ClientController.php    (storeTransfert() + nouvelles methodes)
-app/Views/client/transfert.php          (checkbox frais de retrait inclus)
+app/Views/home.php                      (choix Client / Operateur)
+app/Models/TransactionModel.php         (transfert() reecrit, transfertMultiple() ajoute)
+app/Controllers/ClientController.php    (storeTransfert() + transfertMultiple()/storeTransfertMultiple())
+app/Views/client/transfert.php          (checkbox frais de retrait inclus + lien envoi multiple)
 app/Views/client/transfert_multiple.php (nouveau)
-app/Config/Routes.php                   (routes a ajouter)
+app/Config/Routes.php                   (client/transfert-multiple)
 ```
 
-**Checklist :**
+**Checklist et code :**
 
-- [ ] `Home::index()` + `app/Views/home.php` — remplacer le placeholder actuel par un
-      choix "Je suis client" (→ `login`) / "Je suis l'opérateur" (→ `operateur/login`)
-- [ ] Réécrire `TransactionModel::transfert()` selon l'algorithme détaillé ci-dessus
-      (gère client interne OU préfixe externe, frais de retrait inclus, commission)
-- [ ] `ClientController::transfert()` (GET) — ajouter le champ checkbox "Inclure les
-      frais de retrait", suggestions de numéros (deja fait) restent valables
-- [ ] `ClientController::storeTransfert()` — lire le champ `inclure_frais_retrait`
-      (checkbox), le passer a `TransactionModel::transfert()`
-- [ ] Nouveau `client/transfert_multiple.php` — liste dynamique de numéros (bouton
-      "ajouter un destinataire", un peu de JS vanilla pour dupliquer une ligne) + un
-      montant total
-- [ ] `ClientController::transfertMultiple()` (GET) / `storeTransfertMultiple()` (POST) —
-      diviser le montant total par le nombre de destinataires (le dernier reçoit le
-      reliquat d'arrondi), appeler `TransactionModel::transfert()` en boucle (une
-      transaction distincte par destinataire, frais calculé sur la part de chacun)
-- [ ] Routes à ajouter dans `Routes.php`, groupe `client` : `client/transfert-multiple`
-      (GET), `client/transfert-multiple` (POST)
+- [x] `app/Views/home.php` — choix "Je suis client" (→ `login`) / "Je suis l'opérateur"
+      (→ `operateur/login`)
+
+  ```php
+  <?= $this->extend('layouts/main') ?>
+
+  <?= $this->section('content') ?>
+  <div class="d-flex flex-column justify-content-center align-items-center" style="min-height: 60vh;">
+      <div class="card shadow-sm" style="max-width: 480px; width: 100%;">
+          <div class="card-body p-4 text-center">
+              <h1 class="h4 mb-3">Mobile Money</h1>
+              <p class="text-muted mb-4">Simulation d'opérateur Mobile Money. Qui êtes-vous ?</p>
+              <div class="d-flex flex-column gap-2">
+                  <a href="<?= site_url('login') ?>" class="btn btn-primary">Je suis client</a>
+                  <a href="<?= site_url('operateur/login') ?>" class="btn btn-dark">Je suis l'opérateur</a>
+              </div>
+          </div>
+      </div>
+  </div>
+  <?= $this->endSection() ?>
+  ```
+
+- [x] `TransactionModel::transfert()` réécrit selon l'algorithme détaillé plus haut : gère
+      un client interne existant OU un numéro dont le préfixe est reconnu `autre`
+      (`PrefixeModel::findAutrePrefixe()`), calcule le frais standard + la commission
+      externe + la majoration "frais de retrait inclus", débite l'émetteur du total, ne
+      crédite personne chez nous si externe (pas de compte a créditer)
+- [x] `TransactionModel::transfertMultiple()` — divise le montant total à parts égales
+      (dernier destinataire = reliquat d'arrondi), appelle `transfert()` en boucle,
+      englobé dans une seule transaction SQL (les transactions CI4 se composent par
+      profondeur — `transStart()`/`transComplete()` imbriqués fonctionnent nativement),
+      rollback explicite si un envoi échoue en cours de route
+
+  `app/Models/TransactionModel.php` (méthodes modifiées/ajoutées)
+  ```php
+  public function transfert(int $clientId, string $numeroDestinataire, float $montantSaisi, bool $inclureFraisRetrait = false): array
+  {
+      $clientModel  = model(ClientModel::class);
+      $prefixeModel = model(PrefixeModel::class);
+
+      $destinataire          = $clientModel->findByNumero($numeroDestinataire);
+      $estExterne            = $destinataire === null;
+      $pourcentageCommission = 0.0;
+
+      if ($estExterne) {
+          $prefixeExterne = $prefixeModel->findAutrePrefixe($numeroDestinataire);
+
+          if ($prefixeExterne === null) {
+              throw new \RuntimeException('Numero ou prefixe non reconnu.');
+          }
+
+          $pourcentageCommission = (float) $prefixeExterne['pourcentage_commission'];
+      }
+
+      $this->db->transStart();
+
+      $emetteur = $clientModel->find($clientId);
+      $typeId   = $this->getCodeId('transfert');
+
+      $fraisRetraitInclus = $inclureFraisRetrait
+          ? $this->calculerFrais($this->getCodeId('retrait'), $montantSaisi)
+          : 0.0;
+
+      $montantCredite = $montantSaisi + $fraisRetraitInclus;
+      $fraisTransfert = $this->calculerFrais($typeId, $montantSaisi);
+      $commission     = $estExterne ? round($montantSaisi * $pourcentageCommission / 100, 2) : 0.0;
+
+      $totalDebit = $montantCredite + $fraisTransfert + $commission;
+
+      if ($emetteur->solde < $totalDebit) {
+          $this->db->transRollback();
+          throw new \RuntimeException('Solde insuffisant pour le transfert.');
+      }
+
+      $soldeEmetteurApres = $emetteur->solde - $totalDebit;
+      $clientModel->update($clientId, ['solde' => $soldeEmetteurApres]);
+
+      if (! $estExterne) {
+          $clientModel->update($destinataire->id, ['solde' => $destinataire->solde + $montantCredite]);
+      }
+
+      $this->insert([
+          'type_operation_id'     => $typeId,
+          'client_id'             => $clientId,
+          'client_destination_id' => $estExterne ? null : $destinataire->id,
+          'numero_externe'        => $estExterne ? $numeroDestinataire : null,
+          'montant'               => $montantCredite,
+          'frais'                 => $fraisTransfert,
+          'commission'            => $commission,
+          'frais_retrait_inclus'  => $fraisRetraitInclus,
+          'solde_avant'           => $emetteur->solde,
+          'solde_apres'           => $soldeEmetteurApres,
+      ]);
+
+      $this->db->transComplete();
+
+      return [
+          'frais'       => $fraisTransfert,
+          'commission'  => $commission,
+          'solde'       => $soldeEmetteurApres,
+          'est_externe' => $estExterne,
+      ];
+  }
+
+  public function transfertMultiple(int $clientId, array $numeros, float $montantTotal, bool $inclureFraisRetrait = false): array
+  {
+      $nombreDestinataires = count($numeros);
+
+      if ($nombreDestinataires === 0) {
+          throw new \RuntimeException('Aucun destinataire.');
+      }
+
+      $part      = floor(($montantTotal / $nombreDestinataires) * 100) / 100;
+      $resultats = [];
+
+      $this->db->transStart();
+
+      try {
+          foreach ($numeros as $index => $numero) {
+              $montantPart = ($index === $nombreDestinataires - 1)
+                  ? round($montantTotal - ($part * ($nombreDestinataires - 1)), 2)
+                  : $part;
+
+              $resultats[] = $this->transfert($clientId, $numero, $montantPart, $inclureFraisRetrait);
+          }
+      } catch (\RuntimeException $e) {
+          $this->db->transRollback();
+          throw $e;
+      }
+
+      $this->db->transComplete();
+
+      return $resultats;
+  }
+  ```
+
+- [x] `ClientController::storeTransfert()` — lit `inclure_frais_retrait`, passe le numéro
+      brut à `TransactionModel::transfert()` (plus besoin que le destinataire existe
+      deja comme client), message de confirmation incluant la commission si transfert
+      externe
+- [x] `ClientController::transfertMultiple()` (GET) / `storeTransfertMultiple()` (POST) —
+      valide au moins 2 destinataires, rejette l'auto-transfert, delegue a
+      `TransactionModel::transfertMultiple()`
+
+  `app/Controllers/ClientController.php` (méthodes modifiées/ajoutées)
+  ```php
+  public function storeTransfert()
+  {
+      $destinataire         = trim($this->request->getPost('destinataire') ?? '');
+      $montant              = (float) $this->request->getPost('montant');
+      $inclureFraisRetrait  = (bool) $this->request->getPost('inclure_frais_retrait');
+
+      if ($destinataire === '') {
+          return redirect()->back()->with('error', 'Veuillez saisir le numero du destinataire.');
+      }
+
+      if ($montant <= 0) {
+          return redirect()->back()->with('error', 'Le montant doit etre superieur a 0.');
+      }
+
+      $clientModel = new ClientModel();
+      $moi         = $clientModel->find($this->clientId());
+
+      if ($destinataire === $moi->numero) {
+          return redirect()->back()->with('error', 'Vous ne pouvez pas vous transférer a vous-meme.');
+      }
+
+      $transactionModel = new TransactionModel();
+
+      try {
+          $resultat = $transactionModel->transfert($this->clientId(), $destinataire, $montant, $inclureFraisRetrait);
+      } catch (\RuntimeException $e) {
+          return redirect()->back()->with('error', $e->getMessage());
+      }
+
+      $message = 'Transfert de ' . number_format($montant, 0, ',', ' ') . ' effectue (frais : ' . number_format($resultat['frais'], 0, ',', ' ') . ')';
+
+      if ($resultat['commission'] > 0) {
+          $message .= ', commission autre operateur : ' . number_format($resultat['commission'], 0, ',', ' ');
+      }
+
+      return redirect()->to(site_url('client'))->with('success', $message . '.');
+  }
+
+  public function transfertMultiple()
+  {
+      return view('client/transfert_multiple');
+  }
+
+  public function storeTransfertMultiple()
+  {
+      $numeros             = array_values(array_filter(array_map('trim', $this->request->getPost('numeros') ?? [])));
+      $montant             = (float) $this->request->getPost('montant');
+      $inclureFraisRetrait = (bool) $this->request->getPost('inclure_frais_retrait');
+
+      if (count($numeros) < 2) {
+          return redirect()->back()->with('error', 'Veuillez saisir au moins 2 destinataires.');
+      }
+
+      if ($montant <= 0) {
+          return redirect()->back()->with('error', 'Le montant total doit etre superieur a 0.');
+      }
+
+      $clientModel = new ClientModel();
+      $moi         = $clientModel->find($this->clientId());
+
+      if (in_array($moi->numero, $numeros, true)) {
+          return redirect()->back()->with('error', 'Vous ne pouvez pas vous transférer a vous-meme.');
+      }
+
+      $transactionModel = new TransactionModel();
+
+      try {
+          $transactionModel->transfertMultiple($this->clientId(), $numeros, $montant, $inclureFraisRetrait);
+      } catch (\RuntimeException $e) {
+          return redirect()->back()->with('error', $e->getMessage());
+      }
+
+      return redirect()->to(site_url('client'))->with(
+          'success',
+          'Envoi multiple de ' . number_format($montant, 0, ',', ' ') . ' reparti entre ' . count($numeros) . ' destinataires effectue.'
+      );
+  }
+  ```
+
+- [x] `client/transfert.php` — checkbox "Inclure les frais de retrait" + lien vers l'envoi
+      multiple ; `client/transfert_multiple.php` (nouveau) — liste dynamique de
+      destinataires (ajout/retrait en JS vanilla) + montant total + meme checkbox
+- [x] Routes `client/transfert-multiple` (GET/POST) ajoutées dans le groupe `client`
+      (protege par `clientAuth`, comme le reste)
+
+**Testé en HTTP (bout en bout), verification par calcul manuel :**
+- Depot 200 000 → transfert interne 5 000 (frais 50) → transfert externe 5 000 vers
+  prefixe `autre` 032 (frais 50 + commission 100) → transfert vers prefixe non reconnu
+  (rejete, aucune transaction creee) → transfert interne 5 000 avec frais de retrait
+  inclus (destinataire credite de 5 050) → envoi multiple 30 000 vers 2 destinataires
+  (15 000 chacun, un interne + un externe)
+- **Conservation de l'argent verifiee** : 200 000 deposes = 179 050 restant sur les
+  comptes clients + 20 000 partis en externe (montant brut) + 550 de frais (notre gain)
+  + 400 de commission due aux autres operateurs = 200 000 exactement
 
 ## Definition of Done — V2
 
-- [ ] Login en 2 étapes fonctionnel, `operateur/*` réellement protégé (testé en accédant
+- [x] Login en 2 étapes fonctionnel, `operateur/*` réellement protégé (testé en accédant
       directement à une URL operateur sans être connecté)
-- [ ] Schéma DB V2 appliqué (`prefixes.status`/`pourcentage_commission`,
+- [x] Schéma DB V2 appliqué (`prefixes.status`/`pourcentage_commission`,
       `transactions.numero_externe`/`commission`/`frais_retrait_inclus`)
-- [ ] Ajout d'un préfixe "Autre opérateur" avec commission fonctionnel
-- [ ] Transfert vers un numéro externe fonctionnel (montant brut au destinataire virtuel +
+- [x] Ajout d'un préfixe "Autre opérateur" avec commission fonctionnel
+- [x] Transfert vers un numéro externe fonctionnel (montant brut au destinataire virtuel +
       frais standard chez nous + commission due à l'autre opérateur)
-- [ ] Page gains séparée : nos gains (frais) / montants dus aux autres opérateurs
+- [x] Page gains séparée : nos gains (frais) / montants dus aux autres opérateurs
       (brut + commission)
-- [ ] Option "frais de retrait inclus" fonctionnelle (vérifiée avec calcul manuel)
-- [ ] Envoi multiple fonctionnel (division + arrondi correct, frais par destinataire)
+- [x] Option "frais de retrait inclus" fonctionnelle (vérifiée avec calcul manuel)
+- [x] Envoi multiple fonctionnel (division + arrondi correct, frais par destinataire)
 - [ ] Tag Git `v2` posé sur `main`
