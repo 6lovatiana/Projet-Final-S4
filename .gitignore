@@ -126,3 +126,4 @@ _modules/*
 
 /results/
 /phpunit.xml
+writable/database.db
