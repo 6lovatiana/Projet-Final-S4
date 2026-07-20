@@ -64,6 +64,7 @@ Vagrantfile
 !/writable/debugbar/index.html
 
 php_errors.log
+debug.log
 
 #-------------------------
 # User Guide Temp Files
@@ -125,3 +126,4 @@ _modules/*
 
 /results/
 /phpunit.xml
+writable/database.db
