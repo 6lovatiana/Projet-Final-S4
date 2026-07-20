@@ -3,19 +3,19 @@
 namespace App\Controllers;
 
 use App\Models\FraisModel;
-use App\Models\PrefixModel;
+use App\Models\PrefixeModel;
 use App\Models\TypeOperationModel;
 use Config\Database;
 
 class OperateurController extends BaseController
 {
-    protected PrefixModel $prefixeModel;
+    protected PrefixeModel $prefixeModel;
     protected TypeOperationModel $typeOperationModel;
     protected FraisModel $fraisModel;
 
     public function __construct()
     {
-        $this->prefixeModel       = new PrefixModel();
+        $this->prefixeModel       = new PrefixeModel();
         $this->typeOperationModel = new TypeOperationModel();
         $this->fraisModel         = new FraisModel();
     }
