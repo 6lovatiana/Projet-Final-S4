@@ -1,7 +1,16 @@
 # TODO V1 — Répartition du travail (binôme)
 
 Base commune déjà en place, à ne pas retoucher : schéma DB ([base.sql](base.sql)),
-`.env` (SQLite), squelette CI4 nettoyé. Détails techniques complets : [GUIDE_TECHNIQUE.md](GUIDE_TECHNIQUE.md).
+`.env` (SQLite), squelette CI4 nettoyé, **routes** (`app/Config/Routes.php`), **layout**
+Bootstrap commun (`app/Views/layouts/main.php`) et helpers CI4 (`form`, `url`) actives
+dans `app/Controllers/BaseController.php`. Détails techniques complets :
+[GUIDE_TECHNIQUE.md](GUIDE_TECHNIQUE.md).
+
+Toutes les routes des deux lots sont déjà déclarées dans `Routes.php` (vérifiable avec
+`php spark routes`) et pointent vers des controllers/methodes qui n'existent pas encore
+— normal, chaque lot doit juste créer le controller avec exactement les noms de methode
+utilises dans les routes ci-dessous. Tant qu'un controller n'existe pas, sa route renvoie
+une 404 (déjà vérifié), ça ne casse rien pour l'autre lot.
 
 ## Principe d'organisation
 
@@ -45,15 +54,19 @@ app/Views/operateur/gains.php
 - [ ] `TypeOperationModel` — CRUD sur `types_operation` (table: `id`, `code`, `libelle`)
 - [ ] `FraisModel` — CRUD sur `frais`, filtrable par `type_operation_id` (table: `id`,
       `type_operation_id`, `min`, `max`, `valeur`)
-- [ ] `OperateurController::prefixes()` — lister/ajouter/supprimer un préfixe valable
-- [ ] `OperateurController::typesOperation()` — lister/modifier le barème de frais
-      par tranche pour chaque type d'opération (formulaire éditable, valeurs
-      initiales déjà en base)
-- [ ] `OperateurController::comptes()` — tableau de tous les clients (`clients.numero`,
+- [ ] `OperateurController::prefixes()` — GET, liste des préfixes + formulaire d'ajout
+- [ ] `OperateurController::storePrefixe()` — POST `operateur/prefixes`, ajoute un préfixe
+- [ ] `OperateurController::deletePrefixe($id)` — POST `operateur/prefixes/(:num)/delete`
+- [ ] `OperateurController::typesOperation()` — GET, liste des types + barème de frais
+      par tranche pour chaque type d'opération (valeurs initiales déjà en base)
+- [ ] `OperateurController::updateFrais($id)` — POST `operateur/frais/(:num)`, modifie
+      une ligne du barème (`min`/`max`/`valeur`)
+- [ ] `OperateurController::comptes()` — GET, tableau de tous les clients (`clients.numero`,
       `clients.solde`), tri par solde
-- [ ] `OperateurController::gains()` — somme des `transactions.frais` perçus, groupée
+- [ ] `OperateurController::gains()` — GET, somme des `transactions.frais` perçus, groupée
       par `type_operation_id` (lecture seule sur `transactions`, table déjà créée)
-- [ ] Vues Bootstrap (tableaux + formulaires), route group `/operateur/*`
+- [ ] Vues Bootstrap (tableaux + formulaires) qui étendent `layouts/main` :
+      `<?= $this->extend('layouts/main') ?>` / `<?= $this->section('content') ?>` / `<?= $this->endSection() ?>`
 
 ---
 
@@ -78,38 +91,54 @@ app/Views/client/historique.php
 **Checklist :**
 
 - [ ] `ClientModel` — CRUD sur `clients` (`id`, `numero`, `solde`)
-- [ ] `AuthController::login()` — saisie du numéro, vérifie le préfixe (table
-      `prefixes`, en lecture seule), crée le client s'il n'existe pas encore
-      (login auto, aucune inscription), stocke `client_id` en session
+- [ ] `AuthController::login()` — GET, formulaire de saisie du numéro
+- [ ] `AuthController::attempt()` — POST `login`, vérifie le préfixe (table `prefixes`,
+      en lecture seule), crée le client s'il n'existe pas encore (login auto, aucune
+      inscription), stocke `client_id` en session, redirige vers `client`
+- [ ] `AuthController::logout()` — GET, détruit la session, redirige vers `/`
 - [ ] `ClientAuthFilter` — protège les routes `/client/*` (redirige vers login si pas
-      de session), à enregistrer dans `app/Config/Filters.php` (voir Coordination)
+      de session). Une fois créé, l'activer dans `Routes.php` en changeant :
+      `$routes->group('client', static function ($routes) {...})` en
+      `$routes->group('client', ['filter' => 'clientAuth'], static function ($routes) {...})`
+      et enregistrer l'alias `'clientAuth' => \App\Filters\ClientAuthFilter::class`
+      dans `app/Config/Filters.php` (`$aliases`)
 - [ ] `TransactionModel::calculerFrais()` — lit le barème dans `frais` (lecture seule,
       la table est deja remplie par le Lot 1 ou par `base.sql`), voir l'exemple de code
       dans [GUIDE_TECHNIQUE.md §5](GUIDE_TECHNIQUE.md#5-extrait-de-code-cle--calcul-automatique-des-frais)
-- [ ] `ClientController::dashboard()` — affiche le solde du client connecté
-- [ ] `ClientController::depot()` — crédite le solde, frais = 0, insère dans `transactions`
-- [ ] `ClientController::retrait()` — vérifie solde suffisant (montant + frais),
-      débite, insère dans `transactions`
-- [ ] `ClientController::transfert()` — vérifie solde suffisant, débite l'émetteur,
-      crédite le destinataire (`client_destination_id`), insère dans `transactions`
-- [ ] `ClientController::historique()` — liste des `transactions` du client connecté
-- [ ] Vues Bootstrap (formulaires + tableaux), route group `/client/*`
+- [ ] `ClientController::dashboard()` — GET `client`, affiche le solde du client connecté
+- [ ] `ClientController::depot()` / `storeDepot()` — GET formulaire / POST `client/depot`,
+      crédite le solde, frais = 0, insère dans `transactions`
+- [ ] `ClientController::retrait()` / `storeRetrait()` — GET formulaire / POST `client/retrait`,
+      vérifie solde suffisant (montant + frais), débite, insère dans `transactions`
+- [ ] `ClientController::transfert()` / `storeTransfert()` — GET formulaire / POST `client/transfert`,
+      vérifie solde suffisant, débite l'émetteur, crédite le destinataire
+      (`client_destination_id`), insère dans `transactions`
+- [ ] `ClientController::historique()` — GET `client/historique`, liste des `transactions`
+      du client connecté
+- [ ] Vues Bootstrap (formulaires + tableaux) qui étendent `layouts/main` :
+      `<?= $this->extend('layouts/main') ?>` / `<?= $this->section('content') ?>` / `<?= $this->endSection() ?>`
 
 ---
 
-## Coordination (fichiers partagés)
+## Coordination (fichiers partagés déjà faits)
 
-Ces 2 fichiers seront touchés par les deux lots — ajouter ses lignes sans supprimer
-celles de l'autre, conflits attendus mais triviaux à résoudre :
-
-- **`app/Config/Routes.php`** — chacun ajoute son propre groupe de routes :
+- **`app/Config/Routes.php`** — toutes les routes des deux lots sont déjà déclarées
+  (groupes `operateur/*` et `client/*` + `login`/`logout`). Chacun crée uniquement son
+  controller avec les noms de méthode exacts listés ci-dessus ; en principe plus besoin
+  de toucher ce fichier (sauf activation du filtre `clientAuth` par le Lot 2).
+- **`app/Views/layouts/main.php`** — layout Bootstrap commun avec navbar (liens vers
+  toutes les pages des deux lots) déjà créé. Chaque vue doit l'étendre, ne pas le
+  modifier sans prévenir l'autre :
   ```php
-  $routes->group('operateur', static function ($routes) { /* Lot 1 */ });
-  $routes->group('client', static function ($routes) { /* Lot 2 */ });
+  <?= $this->extend('layouts/main') ?>
+  <?= $this->section('content') ?>
+      ... contenu de la page ...
+  <?= $this->endSection() ?>
   ```
-- **`app/Views/layouts/main.php`** — layout Bootstrap commun (header/nav/footer),
-  a créer une seule fois par la personne qui commence en premier, puis réutilisé par
-  l'autre via `<?= $this->extend('layouts/main') ?>` sans le modifier
+- **`app/Controllers/BaseController.php`** — helpers `form` et `url` déjà actives pour
+  tous les controllers (utilisables directement : `site_url()`, `form_open()`, etc.)
+- **`app/Config/App.php`** — `indexPage` vidé pour des URLs propres (`/client` au lieu
+  de `/index.php/client`)
 
 ## Definition of Done — V1
 
