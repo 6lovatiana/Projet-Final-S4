@@ -154,6 +154,22 @@ class TransactionModel extends Model
     }
 
     /**
+     * Numeros des destinataires deja utilises par ce client dans ses transferts,
+     * du plus recent au plus ancien (sans doublon).
+     */
+    public function getDestinatairesRecents(int $clientId): array
+    {
+        $rows = $this->select('clients.numero')
+            ->join('clients', 'clients.id = transactions.client_destination_id')
+            ->where('transactions.client_id', $clientId)
+            ->where('transactions.client_destination_id IS NOT NULL')
+            ->orderBy('transactions.created_at', 'DESC')
+            ->findAll();
+
+        return array_values(array_unique(array_map(static fn ($row) => $row->numero, $rows)));
+    }
+
+    /**
      * Résout un code de type d'opération (depot, retrait, transfert) en son id.
      */
     private function getCodeId(string $code): int

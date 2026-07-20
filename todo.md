@@ -515,6 +515,14 @@ app/Views/client/historique.php
       {
           return $this->where('numero', $numero)->first();
       }
+
+      /**
+       * Tous les clients sauf celui donne (suggestions de destinataire pour un transfert).
+       */
+      public function findAllExcept(int $excludeId): array
+      {
+          return $this->where('id !=', $excludeId)->findAll();
+      }
   }
   ```
 
@@ -773,7 +781,22 @@ app/Views/client/historique.php
               ->findAll();
       }
 
-      
+      /**
+       * Numeros des destinataires deja utilises par ce client dans ses transferts,
+       * du plus recent au plus ancien (sans doublon).
+       */
+      public function getDestinatairesRecents(int $clientId): array
+      {
+          $rows = $this->select('clients.numero')
+              ->join('clients', 'clients.id = transactions.client_destination_id')
+              ->where('transactions.client_id', $clientId)
+              ->where('transactions.client_destination_id IS NOT NULL')
+              ->orderBy('transactions.created_at', 'DESC')
+              ->findAll();
+
+          return array_values(array_unique(array_map(static fn ($row) => $row->numero, $rows)));
+      }
+
       private function getCodeId(string $code): int
       {
           $row = $this->db->table('types_operation')
@@ -873,10 +896,24 @@ app/Views/client/historique.php
           );
       }
 
-      
+      /**
+       * Suggestions de numeros : destinataires deja utilises par ce client en priorite,
+       * puis les autres clients de la base.
+       */
       public function transfert()
       {
-          return view('client/transfert');
+          $clientModel      = new ClientModel();
+          $transactionModel = new TransactionModel();
+
+          $recents = $transactionModel->getDestinatairesRecents($this->clientId());
+          $autres  = array_map(
+              static fn ($client) => $client->numero,
+              $clientModel->findAllExcept($this->clientId())
+          );
+
+          $suggestions = array_values(array_unique(array_merge($recents, $autres)));
+
+          return view('client/transfert', ['suggestions' => $suggestions]);
       }
 
       
@@ -1081,7 +1118,7 @@ app/Views/client/historique.php
   <?= $this->endSection() ?>
   ```
 
-  `app/Views/client/transfert.php`
+  `app/Views/client/transfert.php` (avec suggestion de numeros, voir ci-dessous)
   ```php
   <?= $this->extend('layouts/main') ?>
 
@@ -1106,10 +1143,17 @@ app/Views/client/historique.php
                               class="form-control"
                               id="destinataire"
                               name="destinataire"
+                              list="destinataires-suggestions"
+                              autocomplete="off"
                               placeholder="Ex : 0331234567"
                               value="<?= esc(old('destinataire')) ?>"
                               required
                           >
+                          <datalist id="destinataires-suggestions">
+                              <?php foreach ($suggestions as $numero) : ?>
+                                  <option value="<?= esc($numero) ?>"></option>
+                              <?php endforeach; ?>
+                          </datalist>
                       </div>
                       <div class="mb-3">
                           <label for="montant" class="form-label">Montant (Ar)</label>
@@ -1181,8 +1225,7 @@ app/Views/client/historique.php
 
 ---
 
-## Coordination (fichier
-s partagés déjà faits)
+## Coordination (fichiers partagés déjà faits)
 
 - **`app/Config/Routes.php`** — toutes les routes des deux lots sont déjà déclarées
   (groupes `operateur/*` et `client/*` + `login`/`logout`). Chacun crée uniquement son
@@ -1201,3 +1244,157 @@ s partagés déjà faits)
   tous les controllers (utilisables directement : `site_url()`, `form_open()`, etc.)
 - **`app/Config/App.php`** — `indexPage` vidé pour des URLs propres (`/client` au lieu
   de `/index.php/client`)
+
+---
+
+# TODO Version 2
+
+Énoncé :
+
+> Coté opérateur
+> - Configuration des préfixes valable pour les autres opérateurs (ex: 032 et 031, …)
+> - Configuration % en plus de commissions pour les transferts vers les autres opérateurs
+> - Sur la page "Situation gain via les différents frais", séparer opérateur et autres opérateurs
+> - Situation des montants à envoyer à chaque opérateur
+>
+> Coté client
+> - Option inclure frais de retrait lors de l'envoi
+> - Envoi multiple vers plusieurs numéros (divisé le montant pour chaque numéro)
+
+## Analyse & schéma DB (commun, à faire avant les 2 lots — comme pour la V1)
+
+La V1 distingue déjà nos préfixes (table `prefixes`, utilisée pour valider le login) des
+numéros non reconnus. La V2 ajoute une deuxième categorie : les préfixes des **autres**
+opérateurs, valables uniquement comme **destination** d'un transfert (jamais pour se
+logger — ce ne sont pas nos clients, on ne connait pas leur solde).
+
+**Nouvelle table `prefixes_externes`** (préfixe + commission, combinés dans un seul
+ecran comme demandé par les 2 premiers points de l'enonce) :
+
+```sql
+CREATE TABLE prefixes_externes (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    prefixe                VARCHAR(5) NOT NULL UNIQUE,
+    pourcentage_commission DECIMAL(5,2) NOT NULL DEFAULT 0
+);
+```
+
+**Modification de `transactions`** — un envoi vers un autre opérateur n'a pas de
+`client_destination_id` (le destinataire n'est pas un client chez nous), il faut donc
+stocker son numéro brut. On separe aussi `commission` de `frais` pour pouvoir les
+distinguer facilement sur la page "gains" :
+
+```sql
+ALTER TABLE transactions ADD COLUMN numero_externe VARCHAR(20);
+ALTER TABLE transactions ADD COLUMN commission DECIMAL(15,2) NOT NULL DEFAULT 0;
+```
+
+- `numero_externe IS NULL` → operation interne (comme en V1)
+- `numero_externe IS NOT NULL` → transfert vers un autre operateur (`client_destination_id`
+  reste NULL dans ce cas)
+- `frais` = barème habituel (table `frais`, comme en V1) ; `commission` = en plus,
+  calculée uniquement pour les transferts externes (`montant * pourcentage_commission / 100`)
+
+## Questions ouvertes à trancher en équipe avant de coder
+
+Ces points ne sont pas précisés dans l'énoncé — à décider ensemble, les choix ci-dessous
+sont juste des recommandations par défaut :
+
+1. **Un numéro externe doit-il déjà exister quelque part chez nous ?**
+   Non — on ne gère pas les clients des autres opérateurs, donc on ne peut vérifier que le
+   **préfixe** (contre `prefixes_externes`), pas l'existence réelle du numéro. Contrairement
+   au transfert interne (V1) qui exige un client déjà enregistré.
+2. **La commission remplace-t-elle le frais de transfert standard ou s'ajoute-t-elle ?**
+   Recommandation : elle s'ajoute (frais standard + commission externe), les deux sont un
+   gain pour l'opérateur mais affichés séparément sur la page gains.
+3. **"Montants à envoyer à chaque opérateur" : montant brut ou net de commission ?**
+   Recommandation : montant brut envoyé (`SUM(transactions.montant)`), car c'est ce que le
+   destinataire doit recevoir chez l'autre opérateur — la commission reste chez nous.
+4. **"Frais de retrait inclus" (option côté client) : qui paie quoi ?**
+   Recommandation : si coché, on ajoute au montant envoyé le frais de retrait estimé
+   (`calculerFrais('retrait', montant)`) pour que le destinataire, après avoir lui-même
+   retiré, se retrouve avec le montant net initialement voulu par l'émetteur.
+5. **Envoi multiple : le frais est-il calculé sur le montant total ou sur la part de
+   chaque destinataire ?**
+   Recommandation : sur la part de chacun (chaque envoi est une transaction distincte dans
+   `transactions`, donc son propre frais selon le barème), comme des transferts normaux
+   effectués en série.
+
+## Lot 1 — Côté Opérateur (V2)
+
+**Fichiers à créer :**
+
+```
+app/Models/PrefixeExterneModel.php
+app/Controllers/OperateurController.php   (methodes a ajouter)
+app/Views/operateur/prefixes_externes.php
+app/Views/operateur/montants_a_envoyer.php
+app/Views/operateur/gains.php             (a modifier : separer interne/externe)
+app/Config/Routes.php                     (routes a ajouter, cf Coordination V1)
+```
+
+**Checklist :**
+
+- [ ] Migration `base.sql` : table `prefixes_externes` + colonnes `transactions.numero_externe`
+      et `transactions.commission` (voir schema ci-dessus)
+- [ ] `PrefixeExterneModel` — CRUD sur `prefixes_externes` (meme pattern que `PrefixeModel`
+      du Lot 1 V1), avec validation du pourcentage (0-100)
+- [ ] `OperateurController::prefixesExternes()` / `storePrefixeExterne()` /
+      `deletePrefixeExterne()` / `updateCommission($id)` — meme pattern que
+      `prefixes()`/`storePrefixe()`/`deletePrefixe()` de la V1, plus le champ commission
+- [ ] Vue `operateur/prefixes_externes.php` — liste + formulaire d'ajout (prefixe + %),
+      edition du % par ligne
+- [ ] Modifier `OperateurController::gains()` : deux blocs distincts —
+      "Nos clients" (`numero_externe IS NULL`, somme de `frais`) et
+      "Autres operateurs" (`numero_externe IS NOT NULL`, somme de `frais` + `commission`
+      separement)
+- [ ] Nouvel ecran `OperateurController::montantsAEnvoyer()` — somme de `transactions.montant`
+      groupee par prefixe externe (jointure sur les 3 premiers caracteres de
+      `numero_externe` = `prefixes_externes.prefixe`), pour savoir combien reverser a
+      chaque operateur
+- [ ] Routes a ajouter dans `app/Config/Routes.php`, groupe `operateur` :
+      `operateur/prefixes-externes` (GET/POST), `operateur/prefixes-externes/(:num)/delete`
+      (POST), `operateur/commissions/(:num)` (POST), `operateur/montants-a-envoyer` (GET)
+
+## Lot 2 — Côté Client (V2)
+
+**Fichiers à créer / modifier :**
+
+```
+app/Controllers/ClientController.php   (storeTransfert a modifier + nouvelles methodes)
+app/Views/client/transfert.php         (checkbox frais de retrait inclus)
+app/Views/client/transfert_multiple.php
+app/Config/Routes.php                  (routes a ajouter)
+```
+
+**Checklist :**
+
+- [ ] Modifier `ClientController::storeTransfert()` : si le numero du destinataire ne
+      correspond a aucun client existant, verifier son prefixe contre `prefixes_externes` ;
+      si valide, calculer la commission (`montant * pourcentage / 100`) en plus du frais
+      standard, debiter emetteur (montant + frais + commission), enregistrer la transaction
+      avec `numero_externe` renseigne et `client_destination_id` = null (pas de credit
+      cote destinataire, il n'est pas chez nous)
+- [ ] Ajouter une checkbox "Inclure les frais de retrait" sur `client/transfert.php` ;
+      si cochee, `storeTransfert()` ajoute au montant envoye le frais de retrait estime
+      (voir question ouverte n°4)
+- [ ] Nouveau formulaire `client/transfert_multiple.php` — liste dynamique de numeros
+      (bouton "ajouter un destinataire", un peu de JS vanilla pour dupliquer une ligne) +
+      un montant total ; affichage cote client du montant par destinataire avant validation
+- [ ] `ClientController::transfertMultiple()` (GET) / `storeTransfertMultiple()` (POST) —
+      diviser le montant total par le nombre de destinataires (le dernier recoit le
+      reliquat d'arrondi), creer une transaction distincte par destinataire (reutilise
+      `TransactionModel::transfert()` en boucle, ou nouvelle methode `transfertMultiple()`
+      dans `TransactionModel` qui englobe toute la boucle dans une seule transaction SQL)
+- [ ] Routes a ajouter dans `app/Config/Routes.php`, groupe `client` :
+      `client/transfert-multiple` (GET), `client/transfert-multiple` (POST)
+
+## Definition of Done — V2
+
+- [ ] Schema DB V2 applique (`prefixes_externes`, colonnes `transactions`)
+- [ ] Transfert vers un numero externe fonctionnel (commission + montant a envoyer)
+- [ ] Page gains separee interne/externe
+- [ ] Page "montants a envoyer par operateur"
+- [ ] Option frais de retrait inclus fonctionnelle
+- [ ] Envoi multiple fonctionnel (division + arrondi correct)
+- [ ] Tag Git `v2` pose sur `main`
