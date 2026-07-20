@@ -31,6 +31,7 @@ class AuthController extends BaseController
 
         $prefixeValide = db_connect()->table('prefixes')
             ->where('prefixe', $prefixe)
+            ->where('status', 'principal')
             ->countAllResults() > 0;
 
         if (! $prefixeValide) {

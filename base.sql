@@ -7,17 +7,25 @@ PRAGMA foreign_keys = ON;
 
 -- ---------------------------------------------------------------------
 -- Table : prefixes
--- Prefixes telephoniques valables cote operateur (ex: 033, 037)
+-- Prefixes telephoniques valables. `status` distingue :
+--   - 'principal' : notre operateur (ex: 033, 037) - utilise pour le login client
+--   - 'autre'     : un autre operateur (ex: 032, 031) - reconnu uniquement comme
+--                   destination de transfert, jamais pour se logger. `pourcentage_commission`
+--                   n'est utilise que pour les prefixes 'autre'.
 -- ---------------------------------------------------------------------
 DROP TABLE IF EXISTS prefixes;
 CREATE TABLE prefixes (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    prefixe  VARCHAR(5) NOT NULL UNIQUE
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    prefixe                 VARCHAR(5) NOT NULL UNIQUE,
+    status                  VARCHAR(10) NOT NULL DEFAULT 'principal',
+    pourcentage_commission  DECIMAL(5,2) NOT NULL DEFAULT 0
 );
 
-INSERT INTO prefixes (prefixe) VALUES
-    ('033'),
-    ('037');
+INSERT INTO prefixes (prefixe, status, pourcentage_commission) VALUES
+    ('033', 'principal', 0),
+    ('037', 'principal', 0),
+    ('032', 'autre', 2),
+    ('031', 'autre', 2);
 
 -- ---------------------------------------------------------------------
 -- Table : clients
@@ -96,7 +104,12 @@ UNION ALL SELECT id, 1000001, 2000000, 3000 FROM types_operation WHERE code = 't
 -- Table : transactions
 -- Historique des operations (necessaire pour "voir les historiques",
 -- "situation des comptes clients" et "situation gain via les frais").
--- client_destination_id est utilise uniquement pour un transfert.
+-- client_destination_id est utilise uniquement pour un transfert interne.
+-- numero_externe est utilise a la place pour un transfert vers un prefixe
+-- 'autre' (pas de client chez nous a crediter) ; frais = notre gain,
+-- commission = part due a l'autre operateur (transferts externes
+-- uniquement), frais_retrait_inclus = majoration ajoutee au montant
+-- credite si l'emetteur a coche l'option "frais de retrait inclus".
 -- ---------------------------------------------------------------------
 DROP TABLE IF EXISTS transactions;
 CREATE TABLE transactions (
@@ -104,8 +117,11 @@ CREATE TABLE transactions (
     type_operation_id       INTEGER NOT NULL,
     client_id               INTEGER NOT NULL,
     client_destination_id   INTEGER,
+    numero_externe          VARCHAR(20),
     montant                 DECIMAL(15,2) NOT NULL,
     frais                   DECIMAL(15,2) NOT NULL DEFAULT 0,
+    commission              DECIMAL(15,2) NOT NULL DEFAULT 0,
+    frais_retrait_inclus    DECIMAL(15,2) NOT NULL DEFAULT 0,
     solde_avant             DECIMAL(15,2) NOT NULL,
     solde_apres             DECIMAL(15,2) NOT NULL,
     created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
