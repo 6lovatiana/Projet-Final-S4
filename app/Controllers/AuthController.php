@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Models\ClientModel;
+use Config\Database;
 
 class AuthController extends BaseController
 {
@@ -28,7 +29,7 @@ class AuthController extends BaseController
 
         $prefixe = substr($numero, 0, 3);
 
-        $prefixeValide = $this->db->table('prefixes')
+        $prefixeValide = Database::connect()->table('prefixes')
             ->where('prefixe', $prefixe)
             ->countAllResults() > 0;
 
