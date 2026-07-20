@@ -86,10 +86,23 @@ class ClientController extends BaseController
 
     /**
      * GET /client/transfert — Formulaire de transfert.
+     * Suggestions de numeros : destinataires deja utilises par ce client en priorite,
+     * puis les autres clients de la base.
      */
     public function transfert()
     {
-        return view('client/transfert');
+        $clientModel      = new ClientModel();
+        $transactionModel = new TransactionModel();
+
+        $recents = $transactionModel->getDestinatairesRecents($this->clientId());
+        $autres  = array_map(
+            static fn ($client) => $client->numero,
+            $clientModel->findAllExcept($this->clientId())
+        );
+
+        $suggestions = array_values(array_unique(array_merge($recents, $autres)));
+
+        return view('client/transfert', ['suggestions' => $suggestions]);
     }
 
     /**

@@ -21,10 +21,17 @@
                             class="form-control"
                             id="destinataire"
                             name="destinataire"
+                            list="destinataires-suggestions"
+                            autocomplete="off"
                             placeholder="Ex : 0335555555"
                             value="<?= esc(old('destinataire')) ?>"
                             required
                         >
+                        <datalist id="destinataires-suggestions">
+                            <?php foreach ($suggestions as $numero) : ?>
+                                <option value="<?= esc($numero) ?>"></option>
+                            <?php endforeach; ?>
+                        </datalist>
                     </div>
                     <div class="mb-3">
                         <label for="montant" class="form-label">Montant (Ar)</label>
