@@ -106,12 +106,14 @@ class ClientController extends BaseController
     }
 
     /**
-     * POST /client/transfert — Execute le transfert.
+     * POST /client/transfert — Execute le transfert (vers un client existant
+     * ou vers un numero dont le prefixe est reconnu comme "autre operateur").
      */
     public function storeTransfert()
     {
-        $destinataire = trim($this->request->getPost('destinataire') ?? '');
-        $montant      = (float) $this->request->getPost('montant');
+        $destinataire         = trim($this->request->getPost('destinataire') ?? '');
+        $montant              = (float) $this->request->getPost('montant');
+        $inclureFraisRetrait  = (bool) $this->request->getPost('inclure_frais_retrait');
 
         if ($destinataire === '') {
             return redirect()->back()->with('error', 'Veuillez saisir le numero du destinataire.');
@@ -122,27 +124,73 @@ class ClientController extends BaseController
         }
 
         $clientModel = new ClientModel();
-        $dest = $clientModel->findByNumero($destinataire);
+        $moi         = $clientModel->find($this->clientId());
 
-        if ($dest === null) {
-            return redirect()->back()->with('error', 'Le numero "' . esc($destinataire) . '" est introuvable.');
-        }
-
-        if ((int) $dest->id === $this->clientId()) {
+        if ($destinataire === $moi->numero) {
             return redirect()->back()->with('error', 'Vous ne pouvez pas vous transférer a vous-meme.');
         }
 
         $transactionModel = new TransactionModel();
 
         try {
-            $resultat = $transactionModel->transfert($this->clientId(), (int) $dest->id, $montant);
+            $resultat = $transactionModel->transfert($this->clientId(), $destinataire, $montant, $inclureFraisRetrait);
+        } catch (\RuntimeException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
+
+        $message = 'Transfert de ' . number_format($montant, 0, ',', ' ') . ' effectue (frais : ' . number_format($resultat['frais'], 0, ',', ' ') . ')';
+
+        if ($resultat['commission'] > 0) {
+            $message .= ', commission autre operateur : ' . number_format($resultat['commission'], 0, ',', ' ');
+        }
+
+        return redirect()->to(site_url('client'))->with('success', $message . '.');
+    }
+
+    /**
+     * GET /client/transfert-multiple — Formulaire d'envoi multiple.
+     */
+    public function transfertMultiple()
+    {
+        return view('client/transfert_multiple');
+    }
+
+    /**
+     * POST /client/transfert-multiple — Divise le montant total entre tous
+     * les destinataires et execute un transfert distinct pour chacun.
+     */
+    public function storeTransfertMultiple()
+    {
+        $numeros             = array_values(array_filter(array_map('trim', $this->request->getPost('numeros') ?? [])));
+        $montant             = (float) $this->request->getPost('montant');
+        $inclureFraisRetrait = (bool) $this->request->getPost('inclure_frais_retrait');
+
+        if (count($numeros) < 2) {
+            return redirect()->back()->with('error', 'Veuillez saisir au moins 2 destinataires.');
+        }
+
+        if ($montant <= 0) {
+            return redirect()->back()->with('error', 'Le montant total doit etre superieur a 0.');
+        }
+
+        $clientModel = new ClientModel();
+        $moi         = $clientModel->find($this->clientId());
+
+        if (in_array($moi->numero, $numeros, true)) {
+            return redirect()->back()->with('error', 'Vous ne pouvez pas vous transférer a vous-meme.');
+        }
+
+        $transactionModel = new TransactionModel();
+
+        try {
+            $transactionModel->transfertMultiple($this->clientId(), $numeros, $montant, $inclureFraisRetrait);
         } catch (\RuntimeException $e) {
             return redirect()->back()->with('error', $e->getMessage());
         }
 
         return redirect()->to(site_url('client'))->with(
             'success',
-            'Transfert de ' . number_format($montant, 0, ',', ' ') . ' effectue (frais : ' . number_format($resultat['frais'], 0, ',', ' ') . ').'
+            'Envoi multiple de ' . number_format($montant, 0, ',', ' ') . ' reparti entre ' . count($numeros) . ' destinataires effectue.'
         );
     }
 
