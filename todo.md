@@ -523,7 +523,8 @@ app/Views/client/historique.php
 
 ---
 
-## Coordination (fichiers partagés déjà faits)
+## Coordination (fichier
+s partagés déjà faits)
 
 - **`app/Config/Routes.php`** — toutes les routes des deux lots sont déjà déclarées
   (groupes `operateur/*` et `client/*` + `login`/`logout`). Chacun crée uniquement son
