@@ -1397,7 +1397,7 @@ app/Config/Filters.php                     (alias operateurAuth)
 app/Views/layouts/main.php                 (menu Operateur conditionne par is_operateur)
 ```
 
-**Checklist :**
+**Checklist et code :**
 
 - [ ] Migration `base.sql` : colonnes `status`/`pourcentage_commission` sur `prefixes`,
       colonnes `numero_externe`/`commission`/`frais_retrait_inclus` sur `transactions`
