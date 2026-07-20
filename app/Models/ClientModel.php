@@ -39,4 +39,12 @@ class ClientModel extends Model
     {
         return $this->where('numero', $numero)->first();
     }
+
+    /**
+     * Tous les clients sauf celui donne (suggestions de destinataire pour un transfert).
+     */
+    public function findAllExcept(int $excludeId): array
+    {
+        return $this->where('id !=', $excludeId)->findAll();
+    }
 }
