@@ -1379,62 +1379,550 @@ fonction transfert(clientId, numeroDestinataire, montantSaisi, inclureFraisRetra
     )
 ```
 
-## Lot 1 — Côté Opérateur (V2)
+## Lot 1 — Côté Opérateur (V2) (ETU003968) ✅ Termine
 
-**Fichiers à créer / modifier :**
+**Fichiers créés / modifiés :**
 
 ```
-app/Filters/OperateurAuthFilter.php        (nouveau, protege operateur/*)
-app/Controllers/OperateurController.php    (login()/attempt() + prefixes()/storePrefixe()
-                                             a adapter pour le champ status+commission +
-                                             gains() a modifier + nouvel ecran)
+app/Filters/OperateurAuthFilter.php        (nouveau)
+app/Models/PrefixeModel.php                (status/commission + findAutrePrefixe())
+app/Controllers/OperateurController.php    (login()/attempt(), prefixes/commission, gains)
 app/Views/operateur/login.php              (nouveau)
-app/Views/operateur/prefixes.php           (a modifier : champ status + commission)
-app/Views/operateur/gains.php              (a modifier : 2 sections)
-app/Views/operateur/situation_operateurs.php (nouveau)
-app/Config/Routes.php                      (routes a ajouter/proteger)
+app/Views/operateur/prefixes.php           (status + commission)
+app/Views/operateur/gains.php              (2 sections)
+app/Config/Routes.php                      (operateur/login hors filtre, groupe protege)
 app/Config/Filters.php                     (alias operateurAuth)
-app/Views/layouts/main.php                 (menu Operateur conditionne par is_operateur)
+app/Views/layouts/main.php                 (menu conditionne par is_operateur)
+.env                                       (operateur.password)
 ```
 
 **Checklist et code :**
 
-- [ ] Migration `base.sql` : colonnes `status`/`pourcentage_commission` sur `prefixes`,
+- [x] Migration `base.sql` : colonnes `status`/`pourcentage_commission` sur `prefixes`,
       colonnes `numero_externe`/`commission`/`frais_retrait_inclus` sur `transactions`
-      (voir schema ci-dessus)
-- [ ] `OperateurController::login()` (GET) / `attempt()` (POST) — verifie un mot de passe
-      unique (stocke dans `.env`, ex `operateur.password`, comparaison simple), stocke
-      `session()->set('is_operateur', true)`, redirige vers `operateur/prefixes`.
-      *(Pas de table d'utilisateurs operateur — un seul role "operateur", pas de comptes
-      nominatifs, coherent avec l'esprit "pas d'inscription" du projet. A confirmer/ajuster
-      si vous voulez plusieurs comptes operateur nommes.)*
-- [ ] `OperateurAuthFilter` — verifie `session()->get('is_operateur')`, sinon redirige
-      vers `operateur/login`
-- [ ] Dans `Routes.php` : sortir `operateur/login` du groupe protege, wrapper le reste du
-      groupe `operateur` avec `['filter' => 'operateurAuth']` (meme principe que
-      `clientAuth` pour le Lot 2 en V1)
-- [ ] Dans `Filters.php` : ajouter l'alias `'operateurAuth' => \App\Filters\OperateurAuthFilter::class`
-- [ ] Modifier `OperateurController::prefixes()`/`storePrefixe()` : le formulaire d'ajout
-      propose un choix "Principal" (par defaut, comportement V1 inchange) ou "Autre
-      operateur" (avec champ `% commission` affiche seulement si "Autre" est choisi) ;
-      la liste affiche le `status` de chaque prefixe
-- [ ] Modifier `OperateurController::gains()` — 2 sections distinctes :
-      1. **Gains de l'operateur** (inchange par rapport a la V1) : `SUM(frais)` par type
-         d'operation (depot/retrait/transfert, interne ET externe confondus car le frais
-         standard nous revient toujours)
-      2. **Montants dus aux autres operateurs** (nouveau) : par prefixe externe
-         (`transactions.numero_externe` jointe sur son prefixe), `SUM(montant)` (brut, a
-         transmettre) + `SUM(commission)` (leur part) + total (brut+commission a reverser)
-- [ ] Nouvel ecran `OperateurController::situationOperateurs()` — meme requete que la
-      section 2 de `gains()` ci-dessus (peut reutiliser la meme methode/vue, ou etre une
-      page dediee si vous preferez separer visuellement "nos gains" de "ce qu'on doit aux
-      autres" — a trancher selon preference d'UX, le calcul est identique)
-- [ ] Route `operateur/situation-operateurs` (GET) si ecran separe
-- [ ] `layouts/main.php` : menu "Operateur" visible si `session()->get('is_operateur')`
-      (au lieu de `client_id` actuellement — c'est un bug herite de la V1 a corriger),
-      bouton Login/Logout qui gere les 2 roles
 
-## Lot 2 — Côté Client (V2) ✅ Termine
+  `base.sql` (tables modifiées)
+  ```sql
+  CREATE TABLE prefixes (
+      id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+      prefixe                 VARCHAR(5) NOT NULL UNIQUE,
+      status                  VARCHAR(10) NOT NULL DEFAULT 'principal',
+      pourcentage_commission  DECIMAL(5,2) NOT NULL DEFAULT 0
+  );
+
+  INSERT INTO prefixes (prefixe, status, pourcentage_commission) VALUES
+      ('033', 'principal', 0),
+      ('037', 'principal', 0),
+      ('032', 'autre', 2),
+      ('031', 'autre', 2);
+
+  CREATE TABLE transactions (
+      id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+      type_operation_id       INTEGER NOT NULL,
+      client_id               INTEGER NOT NULL,
+      client_destination_id   INTEGER,
+      numero_externe          VARCHAR(20),
+      montant                 DECIMAL(15,2) NOT NULL,
+      frais                   DECIMAL(15,2) NOT NULL DEFAULT 0,
+      commission              DECIMAL(15,2) NOT NULL DEFAULT 0,
+      frais_retrait_inclus    DECIMAL(15,2) NOT NULL DEFAULT 0,
+      solde_avant             DECIMAL(15,2) NOT NULL,
+      solde_apres             DECIMAL(15,2) NOT NULL,
+      created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (type_operation_id) REFERENCES types_operation(id),
+      FOREIGN KEY (client_id) REFERENCES clients(id),
+      FOREIGN KEY (client_destination_id) REFERENCES clients(id)
+  );
+  ```
+
+- [x] `OperateurController::login()` (GET) / `attempt()` (POST) — mot de passe unique
+      stocke dans `.env` (`operateur.password`), pas de table de comptes (un seul role
+      "operateur", coherent avec l'absence d'inscription du reste du projet)
+
+  `app/Views/operateur/login.php`
+  ```php
+  <?= $this->extend('layouts/main') ?>
+
+  <?= $this->section('content') ?>
+  <div class="d-flex flex-column justify-content-center align-items-center" style="min-height: 60vh;">
+      <div class="card shadow-sm" style="max-width: 400px; width: 100%;">
+          <div class="card-body p-4">
+              <h1 class="h4 mb-3 text-center">Connexion Operateur</h1>
+
+              <?php $error = session()->getFlashdata('error'); ?>
+              <?php if ($error): ?>
+                  <div class="alert alert-danger"><?= esc($error) ?></div>
+              <?php endif; ?>
+
+              <form method="post" action="<?= site_url('operateur/login') ?>">
+                  <?= csrf_field() ?>
+                  <div class="mb-3">
+                      <label for="password" class="form-label">Mot de passe</label>
+                      <input
+                          type="password"
+                          class="form-control"
+                          id="password"
+                          name="password"
+                          required
+                          autofocus
+                      >
+                  </div>
+                  <button type="submit" class="btn btn-dark w-100">Se connecter</button>
+              </form>
+          </div>
+      </div>
+  </div>
+  <?= $this->endSection() ?>
+  ```
+
+- [x] `OperateurAuthFilter` — verifie `session()->get('is_operateur')`, sinon redirige
+      vers `operateur/login`
+
+  `app/Filters/OperateurAuthFilter.php`
+  ```php
+  <?php
+
+  namespace App\Filters;
+
+  use CodeIgniter\Filters\FilterInterface;
+  use CodeIgniter\HTTP\RequestInterface;
+  use CodeIgniter\HTTP\ResponseInterface;
+
+  class OperateurAuthFilter implements FilterInterface
+  {
+      public function before(RequestInterface $request, $arguments = null)
+      {
+          if (! session()->get('is_operateur')) {
+              return redirect()->to(site_url('operateur/login'));
+          }
+      }
+
+      public function after(RequestInterface $request, ResponseInterface $response, $arguments = null)
+      {
+      }
+  }
+  ```
+
+- [x] Dans `Routes.php` : `operateur/login` sorti du groupe protege, tout le reste du
+      groupe `operateur` proteg via `['filter' => 'operateurAuth']` (meme principe que
+      `clientAuth` en V1)
+
+  `app/Config/Routes.php` (extrait)
+  ```php
+  $routes->get('operateur/login', 'OperateurController::login');
+  $routes->post('operateur/login', 'OperateurController::attempt');
+
+  $routes->group('operateur', ['filter' => 'operateurAuth'], static function ($routes): void {
+      $routes->get('prefixes', 'OperateurController::prefixes');
+      $routes->post('prefixes', 'OperateurController::storePrefixe');
+      $routes->post('prefixes/(:num)/delete', 'OperateurController::deletePrefixe/$1');
+      $routes->post('prefixes/(:num)/commission', 'OperateurController::updateCommission/$1');
+
+      $routes->get('types-operation', 'OperateurController::typesOperation');
+      $routes->post('frais/(:num)', 'OperateurController::updateFrais/$1');
+
+      $routes->get('comptes', 'OperateurController::comptes');
+      $routes->get('gains', 'OperateurController::gains');
+  });
+  ```
+
+- [x] Dans `Filters.php` : alias `'operateurAuth' => \App\Filters\OperateurAuthFilter::class`
+
+  `app/Config/Filters.php` (extrait de `$aliases`)
+  ```php
+  public array $aliases = [
+      // ... aliases par defaut ...
+      'clientAuth'    => \App\Filters\ClientAuthFilter::class,
+      'operateurAuth' => \App\Filters\OperateurAuthFilter::class,
+  ];
+  ```
+
+- [x] `PrefixeModel` — `status` (`principal`/`autre`) + `pourcentage_commission` dans
+      `$allowedFields`, `findAutrePrefixe()` pour identifier un numero externe (utilise
+      par le Lot 2 dans le transfert)
+
+  `app/Models/PrefixeModel.php`
+  ```php
+  <?php
+
+  namespace App\Models;
+
+  use CodeIgniter\Model;
+
+  class PrefixeModel extends Model
+  {
+      protected $table         = 'prefixes';
+      protected $primaryKey    = 'id';
+      protected $returnType    = 'array';
+      protected $useTimestamps = false;
+
+      protected $allowedFields = ['prefixe', 'status', 'pourcentage_commission'];
+
+      protected $validationRules = [
+          'prefixe' => 'required|is_unique[prefixes.prefixe,,id]',
+          'status'  => 'permit_empty|in_list[principal,autre]',
+      ];
+
+      protected $validationMessages = [
+          'prefixe' => [
+              'required'  => 'Le prefixe est obligatoire.',
+              'is_unique' => 'Ce prefixe existe deja.',
+          ],
+      ];
+
+      /**
+       * Prefixes des autres operateurs uniquement (pour identifier un numero de
+       * destination externe lors d'un transfert).
+       */
+      public function findAutrePrefixe(string $numero): ?array
+      {
+          return $this->where('prefixe', substr($numero, 0, 3))
+              ->where('status', 'autre')
+              ->first();
+      }
+  }
+  ```
+
+- [x] Modifier `OperateurController::prefixes()`/`storePrefixe()` : le formulaire d'ajout
+      propose "Principal" (par defaut, comportement V1 inchange) ou "Autre operateur"
+      (+ champ % commission), `updateCommission($id)` pour editer la commission d'un
+      prefixe existant
+
+  `app/Controllers/OperateurController.php` (extrait)
+  ```php
+  public function login()
+  {
+      return view('operateur/login');
+  }
+
+  public function attempt()
+  {
+      $motDePasse = env('operateur.password', 'operateur123');
+
+      if ($this->request->getPost('password') !== $motDePasse) {
+          return redirect()->back()->with('error', 'Mot de passe incorrect.');
+      }
+
+      session()->set('is_operateur', true);
+
+      return redirect()->to(site_url('operateur/prefixes'));
+  }
+
+  public function prefixes()
+  {
+      return view('operateur/prefixes', [
+          'prefixes' => $this->prefixeModel->orderBy('status', 'ASC')->orderBy('prefixe', 'ASC')->findAll(),
+      ]);
+  }
+
+  public function storePrefixe()
+  {
+      $rules = [
+          'prefixe'                => 'required|regex_match[/^[0-9]{2,5}$/]|is_unique[prefixes.prefixe]',
+          'status'                 => 'permit_empty|in_list[principal,autre]',
+          'pourcentage_commission' => 'permit_empty|numeric|greater_than_equal_to[0]|less_than_equal_to[100]',
+      ];
+
+      if (! $this->validate($rules)) {
+          return redirect()->to('operateur/prefixes')->withInput()->with('errors', $this->validator->getErrors());
+      }
+
+      $status     = $this->request->getPost('status') === 'autre' ? 'autre' : 'principal';
+      $commission = $status === 'autre' ? (float) $this->request->getPost('pourcentage_commission') : 0;
+
+      $this->prefixeModel->insert([
+          'prefixe'                => $this->request->getPost('prefixe'),
+          'status'                 => $status,
+          'pourcentage_commission' => $commission,
+      ]);
+
+      return redirect()->to('operateur/prefixes')->with('success', 'Prefixe ajoute.');
+  }
+
+  public function updateCommission(int $id)
+  {
+      $rules = [
+          'pourcentage_commission' => 'required|numeric|greater_than_equal_to[0]|less_than_equal_to[100]',
+      ];
+
+      if (! $this->validate($rules)) {
+          return redirect()->to('operateur/prefixes')->with('errors', $this->validator->getErrors());
+      }
+
+      $this->prefixeModel->update($id, [
+          'pourcentage_commission' => $this->request->getPost('pourcentage_commission'),
+      ]);
+
+      return redirect()->to('operateur/prefixes')->with('success', 'Commission mise a jour.');
+  }
+  ```
+
+  `app/Views/operateur/prefixes.php`
+  ```php
+  <?= $this->extend('layouts/main') ?>
+
+  <?= $this->section('content') ?>
+  <h1 class="h4 mb-4">Prefixes valables</h1>
+
+  <?= $this->include('operateur/_flash') ?>
+
+  <div class="row">
+      <div class="col-md-7">
+          <table class="table table-bordered bg-white align-middle">
+              <thead>
+                  <tr>
+                      <th>Prefixe</th>
+                      <th>Status</th>
+                      <th>Commission</th>
+                      <th class="text-end">Action</th>
+                  </tr>
+              </thead>
+              <tbody>
+                  <?php foreach ($prefixes as $prefixe) : ?>
+                      <tr>
+                          <td><?= esc($prefixe['prefixe']) ?></td>
+                          <td>
+                              <?php if ($prefixe['status'] === 'autre') : ?>
+                                  <span class="badge bg-warning text-dark">Autre operateur</span>
+                              <?php else : ?>
+                                  <span class="badge bg-primary">Principal</span>
+                              <?php endif; ?>
+                          </td>
+                          <td>
+                              <?php if ($prefixe['status'] === 'autre') : ?>
+                                  <form method="post" action="<?= site_url('operateur/prefixes/' . $prefixe['id'] . '/commission') ?>" class="d-flex align-items-center gap-1">
+                                      <?= csrf_field() ?>
+                                      <input type="number" step="0.01" min="0" max="100" class="form-control form-control-sm" style="width: 80px;" name="pourcentage_commission" value="<?= esc($prefixe['pourcentage_commission']) ?>">
+                                      <span>%</span>
+                                      <button type="submit" class="btn btn-sm btn-outline-primary">OK</button>
+                                  </form>
+                              <?php else : ?>
+                                  <span class="text-muted">—</span>
+                              <?php endif; ?>
+                          </td>
+                          <td class="text-end">
+                              <form method="post" action="<?= site_url('operateur/prefixes/' . $prefixe['id'] . '/delete') ?>"
+                                    onsubmit="return confirm('Supprimer ce prefixe ?');">
+                                  <?= csrf_field() ?>
+                                  <button type="submit" class="btn btn-sm btn-outline-danger">Supprimer</button>
+                              </form>
+                          </td>
+                      </tr>
+                  <?php endforeach; ?>
+                  <?php if (empty($prefixes)) : ?>
+                      <tr>
+                          <td colspan="4" class="text-muted">Aucun prefixe configure.</td>
+                      </tr>
+                  <?php endif; ?>
+              </tbody>
+          </table>
+      </div>
+
+      <div class="col-md-5">
+          <div class="card">
+              <div class="card-body">
+                  <h2 class="h6">Ajouter un prefixe</h2>
+                  <form method="post" action="<?= site_url('operateur/prefixes') ?>">
+                      <?= csrf_field() ?>
+                      <div class="mb-3">
+                          <label class="form-label" for="prefixe">Prefixe (ex: 033)</label>
+                          <input type="text" class="form-control" id="prefixe" name="prefixe"
+                                 value="<?= esc(old('prefixe')) ?>" maxlength="5" required>
+                      </div>
+                      <div class="mb-3">
+                          <label class="form-label" for="status">Type</label>
+                          <select class="form-select" id="status" name="status">
+                              <option value="principal">Principal (notre operateur)</option>
+                              <option value="autre">Autre operateur</option>
+                          </select>
+                          <div class="form-text">Par defaut, un prefixe ajoute est "Principal".</div>
+                      </div>
+                      <div class="mb-3">
+                          <label class="form-label" for="pourcentage_commission">% Commission (si "Autre operateur")</label>
+                          <input type="number" step="0.01" min="0" max="100" class="form-control" id="pourcentage_commission" name="pourcentage_commission" value="<?= esc(old('pourcentage_commission') ?: 0) ?>">
+                      </div>
+                      <button type="submit" class="btn btn-primary">Ajouter</button>
+                  </form>
+              </div>
+          </div>
+      </div>
+  </div>
+  <?= $this->endSection() ?>
+  ```
+
+- [x] Modifier `OperateurController::gains()` — 2 sections distinctes :
+      "Gains de l'operateur" (`SUM(frais)` par type, interne ET externe confondus car le
+      frais standard nous revient toujours) et "Montants dus aux autres operateurs"
+      (`SUM(montant)` brut + `SUM(commission)`, groupes par prefixe externe)
+
+  `app/Controllers/OperateurController.php` (methode `gains()`)
+  ```php
+  public function gains()
+  {
+      $db = Database::connect();
+
+      // Gains de notre operateur (frais standard, interne ET externe confondus :
+      // le frais de transfert nous revient toujours, seule la commission part ailleurs)
+      $gains = $db->table('transactions')
+          ->select('types_operation.libelle AS libelle, SUM(transactions.frais) AS total_frais, COUNT(transactions.id) AS nb_operations')
+          ->join('types_operation', 'types_operation.id = transactions.type_operation_id')
+          ->groupBy('types_operation.id')
+          ->get()
+          ->getResultArray();
+
+      $totalGeneral = array_sum(array_column($gains, 'total_frais'));
+
+      // Montants dus aux autres operateurs : montant brut (a transmettre au
+      // destinataire) + commission (leur part), groupes par prefixe externe.
+      $situationOperateurs = $db->table('transactions')
+          ->select('prefixes.prefixe AS prefixe, SUM(transactions.montant) AS total_montant, SUM(transactions.commission) AS total_commission, COUNT(transactions.id) AS nb_operations')
+          ->join('prefixes', 'prefixes.prefixe = SUBSTR(transactions.numero_externe, 1, 3)', 'inner', false)
+          ->where('transactions.numero_externe IS NOT NULL')
+          ->groupBy('prefixes.prefixe')
+          ->get()
+          ->getResultArray();
+
+      return view('operateur/gains', [
+          'gains'               => $gains,
+          'totalGeneral'        => $totalGeneral,
+          'situationOperateurs' => $situationOperateurs,
+      ]);
+  }
+  ```
+
+  `app/Views/operateur/gains.php`
+  ```php
+  <?= $this->extend('layouts/main') ?>
+
+  <?= $this->section('content') ?>
+  <h1 class="h4 mb-4">Situation gain via les differents frais</h1>
+
+  <h2 class="h6">Gains de l'operateur (frais)</h2>
+  <table class="table table-bordered bg-white">
+      <thead>
+          <tr>
+              <th>Type d'operation</th>
+              <th class="text-end">Nb operations</th>
+              <th class="text-end">Total frais percus</th>
+          </tr>
+      </thead>
+      <tbody>
+          <?php foreach ($gains as $ligne) : ?>
+              <tr>
+                  <td><?= esc($ligne['libelle']) ?></td>
+                  <td class="text-end"><?= (int) $ligne['nb_operations'] ?></td>
+                  <td class="text-end"><?= number_format((float) $ligne['total_frais'], 2, ',', ' ') ?> Ar</td>
+              </tr>
+          <?php endforeach; ?>
+          <?php if (empty($gains)) : ?>
+              <tr>
+                  <td colspan="3" class="text-muted">Aucune operation payante enregistree.</td>
+              </tr>
+          <?php endif; ?>
+      </tbody>
+      <tfoot>
+          <tr class="fw-bold">
+              <td colspan="2">Total general</td>
+              <td class="text-end"><?= number_format((float) $totalGeneral, 2, ',', ' ') ?> Ar</td>
+          </tr>
+      </tfoot>
+  </table>
+
+  <h2 class="h6 mt-5">Montants dus aux autres operateurs</h2>
+  <table class="table table-bordered bg-white">
+      <thead>
+          <tr>
+              <th>Prefixe</th>
+              <th class="text-end">Nb transferts</th>
+              <th class="text-end">Montant brut (destinataires)</th>
+              <th class="text-end">Commission due</th>
+              <th class="text-end">Total a reverser</th>
+          </tr>
+      </thead>
+      <tbody>
+          <?php foreach ($situationOperateurs as $op) : ?>
+              <tr>
+                  <td><?= esc($op['prefixe']) ?></td>
+                  <td class="text-end"><?= (int) $op['nb_operations'] ?></td>
+                  <td class="text-end"><?= number_format((float) $op['total_montant'], 2, ',', ' ') ?> Ar</td>
+                  <td class="text-end"><?= number_format((float) $op['total_commission'], 2, ',', ' ') ?> Ar</td>
+                  <td class="text-end fw-bold"><?= number_format((float) $op['total_montant'] + (float) $op['total_commission'], 2, ',', ' ') ?> Ar</td>
+              </tr>
+          <?php endforeach; ?>
+          <?php if (empty($situationOperateurs)) : ?>
+              <tr>
+                  <td colspan="5" class="text-muted">Aucun transfert vers un autre operateur pour le moment.</td>
+              </tr>
+          <?php endif; ?>
+      </tbody>
+  </table>
+  <?= $this->endSection() ?>
+  ```
+
+- [x] `app/Views/layouts/main.php` : menu "Operateur" conditionne par
+      `session()->get('is_operateur')` (au lieu de `client_id`, bug herite de la V1),
+      2 boutons de connexion distincts (Client/Operateur) quand personne n'est connecte
+
+  `app/Views/layouts/main.php` (extrait de la navbar)
+  ```php
+  <ul class="navbar-nav me-auto">
+      <?php if (session()->get('client_id')): ?>
+      <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Client</a>
+          <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="<?= site_url('client') ?>">Solde</a></li>
+              <li><a class="dropdown-item" href="<?= site_url('client/depot') ?>">Depot</a></li>
+              <li><a class="dropdown-item" href="<?= site_url('client/retrait') ?>">Retrait</a></li>
+              <li><a class="dropdown-item" href="<?= site_url('client/transfert') ?>">Transfert</a></li>
+              <li><a class="dropdown-item" href="<?= site_url('client/historique') ?>">Historique</a></li>
+          </ul>
+      </li>
+      <?php endif; ?>
+      <?php if (session()->get('is_operateur')): ?>
+      <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Operateur</a>
+          <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="<?= site_url('operateur/prefixes') ?>">Prefixes</a></li>
+              <li><a class="dropdown-item" href="<?= site_url('operateur/types-operation') ?>">Types &amp; Frais</a></li>
+              <li><a class="dropdown-item" href="<?= site_url('operateur/comptes') ?>">Comptes clients</a></li>
+              <li><a class="dropdown-item" href="<?= site_url('operateur/gains') ?>">Gains</a></li>
+          </ul>
+      </li>
+      <?php endif; ?>
+  </ul>
+  <div class="d-flex gap-2">
+      <?php if (session()->get('client_id')): ?>
+          <a class="btn btn-outline-danger btn-sm" href="<?= site_url('logout') ?>">Logout (client)</a>
+      <?php elseif (session()->get('is_operateur')): ?>
+          <a class="btn btn-outline-danger btn-sm" href="<?= site_url('logout') ?>">Logout (operateur)</a>
+      <?php else: ?>
+          <a class="btn btn-outline-light btn-sm" href="<?= site_url('login') ?>">Login client</a>
+          <a class="btn btn-outline-light btn-sm" href="<?= site_url('operateur/login') ?>">Login operateur</a>
+      <?php endif; ?>
+  </div>
+  ```
+
+**Correction annexe (Lot 2, ligne unique, consequence directe du changement de schema) :**
+`AuthController::attempt()` verifiait juste qu'un prefixe existait dans la table, sans
+filtrer par `status`. Avec l'ajout des prefixes `autre` (032, 031) dans la meme table, un
+client aurait pu se logger avec un numero externe. Corrige en ajoutant
+`->where('status', 'principal')` a la requete.
+
+```php
+$prefixeValide = db_connect()->table('prefixes')
+    ->where('prefixe', $prefixe)
+    ->where('status', 'principal')
+    ->countAllResults() > 0;
+```
+
+**Testé en HTTP (bout en bout) :**
+- Acces direct a `operateur/prefixes` sans session → redirection vers `operateur/login`
+- Mot de passe incorrect → rejete, pas de session creee ; mot de passe correct → acces
+- Ajout d'un prefixe `autre` avec commission → persiste correctement
+- Page gains → 2 sections affichees correctement, chiffres verifies par calcul manuel
+- Login client avec `032...`/`031...` → rejete, `033...`/`037...` → fonctionne
+
+## Lot 2 — Côté Client (V2) (ETU004311) ✅ Termine
 
 **Fichiers créés / modifiés :**
 
