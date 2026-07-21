@@ -127,7 +127,6 @@ _modules/*
 /results/
 /phpunit.xml
 writable/database.db
-writable/database.db
 md/guide.md
 md/sqlite.md
 md/syntaxe.md
