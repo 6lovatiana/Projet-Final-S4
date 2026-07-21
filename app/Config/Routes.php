@@ -46,6 +46,9 @@ $routes->group('operateur', ['filter' => 'operateurAuth'], static function ($rou
 $routes->group('client', ['filter' => 'clientAuth'], static function ($routes): void {
     $routes->get('/', 'ClientController::dashboard');
 
+    $routes->get('epargne', 'ClientController::epargne');
+    $routes->post('epargne', 'ClientController::storeEpargne');
+
     $routes->get('depot', 'ClientController::depot');
     $routes->post('depot', 'ClientController::storeDepot');
 

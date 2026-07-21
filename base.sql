@@ -54,6 +54,9 @@ CREATE TABLE clients (
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE clients ADD COLUMN pourcentage_epargne DECIMAL(5,2) NOT NULL DEFAULT 0;
+ALTER TABLE clients ADD COLUMN solde_epargne DECIMAL(15,2) NOT NULL DEFAULT 0;
+
 -- ---------------------------------------------------------------------
 -- Table : types_operation
 -- depot, retrait, transfert
@@ -67,6 +70,7 @@ CREATE TABLE types_operation (
 
 INSERT INTO types_operation (code, libelle) VALUES
     ('depot', 'Depot'),
+    ('epargne', 'Mise en epargne'),
     ('retrait', 'Retrait'),
     ('transfert', 'Transfert');
 

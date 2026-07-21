@@ -21,6 +21,7 @@
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Client</a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= site_url('client') ?>">Solde</a></li>
+                        <li><a class="dropdown-item" href="<?= site_url('client/epargne') ?>">Epargne</a></li>
                         <li><a class="dropdown-item" href="<?= site_url('client/depot') ?>">Depot</a></li>
                         <li><a class="dropdown-item" href="<?= site_url('client/retrait') ?>">Retrait</a></li>
                         <li><a class="dropdown-item" href="<?= site_url('client/transfert') ?>">Transfert</a></li>

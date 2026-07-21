@@ -16,11 +16,14 @@ class ClientModel extends Model
     protected $allowedFields = [
         'numero',
         'solde',
+        'pourcentage_epargne',
+        'solde_epargne',
     ];
 
     protected $validationRules = [
-        'numero' => 'required|is_unique[clients.numero,id]',
-        'solde'  => 'required|decimal',
+        'numero'             => 'required|is_unique[clients.numero,id]',
+        'solde'              => 'required|decimal',
+        'pourcentage_epargne' => 'permit_empty|decimal|greater_than_equal_to[0]|less_than_equal_to[100]',
     ];
 
     protected $validationMessages = [
@@ -31,6 +34,11 @@ class ClientModel extends Model
         'solde' => [
             'required' => 'Le solde est obligatoire.',
             'decimal'  => 'Le solde doit etre un nombre decimal.',
+        ],
+        'pourcentage_epargne' => [
+            'decimal'               => 'Le pourcentage doit etre un nombre decimal.',
+            'greater_than_equal_to' => 'Le pourcentage doit etre entre 0 et 100.',
+            'less_than_equal_to'    => 'Le pourcentage doit etre entre 0 et 100.',
         ],
     ];
 

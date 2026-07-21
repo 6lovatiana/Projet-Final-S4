@@ -16,6 +16,10 @@
                 <p class="display-5 fw-bold text-success">
                     <?= number_format($client->solde, 2, ',', ' ') ?> Ar
                 </p>
+                <p class="text-muted mb-0">
+                    Epargne : <?= number_format($client->solde_epargne, 2, ',', ' ') ?> Ar
+                    (<?= esc($client->pourcentage_epargne) ?> %)
+                </p>
             </div>
         </div>
 
