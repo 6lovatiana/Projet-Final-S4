@@ -129,3 +129,11 @@ CREATE TABLE transactions (
     FOREIGN KEY (client_id) REFERENCES clients(id),
     FOREIGN KEY (client_destination_id) REFERENCES clients(id)
 );
+
+CREATE TABLE promotion (
+    id INTEGER AUTO_INCREMENT PRIMARY KEY,
+    pourcentage DECIMAL(5,2) NOT NULL,
+    actif TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME NULL,
+    update_at DATETIME NULL
+)

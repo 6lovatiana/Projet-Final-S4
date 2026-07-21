@@ -2192,3 +2192,9 @@ app/Config/Routes.php                   (client/transfert-multiple)
 - [x] Option "frais de retrait inclus" fonctionnelle (vérifiée avec calcul manuel)
 - [x] Envoi multiple fonctionnel (division + arrondi correct, frais par destinataire)
 - [ ] Tag Git `v2` posé sur `main`
+
+creer dans la base le promotion:(meme operateur uniquement)
+en pourcentage sur frais de transfert vers le meme operateur:
+par exemple promotion 10% alors il y a enlevement 10% sur tout
+
+faire dans la bases le modification ou parametrage du promotion.

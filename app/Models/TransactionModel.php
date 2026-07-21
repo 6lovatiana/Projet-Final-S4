@@ -37,6 +37,7 @@ class TransactionModel extends Model
         return $bareme->valeur ?? 0.0;
     }
 
+
     /**
      * Depot : crédite le solde, frais = 0, journalise l'operation.
      */
