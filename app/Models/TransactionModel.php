@@ -47,9 +47,15 @@ class TransactionModel extends Model
         $this->db->transStart();
 
         $client     = $clientModel->find($clientId);
-        $soldeApres = $client->solde + $montant;
+        $soldeApresCredit  = $client->solde + $montant;
+        $montantEpargne    = round($montant * ((float) $client->pourcentage_epargne / 100), 2);
+        $soldeFinal        = $soldeApresCredit - $montantEpargne;
+        $soldeEpargneApres = $client->solde_epargne + $montantEpargne;
 
-        $clientModel->update($clientId, ['solde' => $soldeApres]);
+        $clientModel->update($clientId, [
+            'solde'         => $soldeFinal,
+            'solde_epargne' => $soldeEpargneApres,
+        ]);
 
         $this->insert([
             'type_operation_id' => $this->getCodeId('depot'),
@@ -57,12 +63,28 @@ class TransactionModel extends Model
             'montant'           => $montant,
             'frais'             => 0.0,
             'solde_avant'       => $client->solde,
-            'solde_apres'       => $soldeApres,
+            'solde_apres'       => $soldeFinal,
         ]);
+
+        if ($montantEpargne > 0) {
+            $this->insert([
+                'type_operation_id' => $this->getCodeId('epargne'),
+                'client_id'         => $clientId,
+                'montant'           => $montantEpargne,
+                'frais'             => 0.0,
+                'solde_avant'       => $soldeApresCredit,
+                'solde_apres'       => $soldeFinal,
+            ]);
+        }
 
         $this->db->transComplete();
 
-        return ['frais' => 0.0, 'solde' => $soldeApres];
+        return [
+            'frais'           => 0.0,
+            'solde'           => $soldeFinal,
+            'montant_epargne' => $montantEpargne,
+            'solde_epargne'   => $soldeEpargneApres,
+        ];
     }
 
     /**

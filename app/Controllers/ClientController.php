@@ -27,6 +27,39 @@ class ClientController extends BaseController
     }
 
     /**
+     * GET /client/epargne — Affiche le solde epargne et le pourcentage actif.
+     */
+    public function epargne()
+    {
+        $clientModel = new ClientModel();
+        $client = $clientModel->find($this->clientId());
+
+        return view('client/epargne', ['client' => $client]);
+    }
+
+    /**
+     * POST /client/epargne — Modifie le pourcentage d'epargne.
+     */
+    public function storeEpargne()
+    {
+        $rules = [
+            'pourcentage_epargne' => 'required|numeric|greater_than_equal_to[0]|less_than_equal_to[100]',
+        ];
+
+        if (! $this->validate($rules)) {
+            return redirect()->back()->withInput()->with('errors', $this->validator->getErrors());
+        }
+
+        $clientModel = new ClientModel();
+
+        if (! $clientModel->update($this->clientId(), ['pourcentage_epargne' => $this->request->getPost('pourcentage_epargne')])) {
+            return redirect()->back()->withInput()->with('errors', $clientModel->errors());
+        }
+
+        return redirect()->to(site_url('client/epargne'))->with('success', 'Pourcentage d\'epargne mis a jour.');
+    }
+
+    /**
      * GET /client/depot — Formulaire de depot.
      */
     public function depot()
@@ -46,9 +79,16 @@ class ClientController extends BaseController
         }
 
         $transactionModel = new TransactionModel();
-        $transactionModel->depot($this->clientId(), $montant);
 
-        return redirect()->to(site_url('client'))->with('success', 'Depot de ' . number_format($montant, 0, ',', ' ') . ' effectue.');
+        $resultat = $transactionModel->depot($this->clientId(), $montant);
+
+        $message = 'Depot de ' . number_format($montant, 0, ',', ' ') . ' effectue.';
+
+        if ($resultat['montant_epargne'] > 0) {
+            $message .= ' Dont ' . number_format($resultat['montant_epargne'], 0, ',', ' ') . ' mis en epargne.';
+        }
+
+        return redirect()->to(site_url('client'))->with('success', $message);
     }
 
     /**
