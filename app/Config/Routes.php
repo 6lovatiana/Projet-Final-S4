@@ -12,7 +12,6 @@ $routes->get('/', 'Home::index');
 $routes->get('login', 'AuthController::login');
 $routes->post('login', 'AuthController::attempt');
 $routes->get('logout', 'AuthController::logout');
-
 // --------------------------------------------------------------------
 // Lot 1 - Cote Operateur (app/Controllers/OperateurController.php)
 // operateur/login reste hors filtre (sinon impossible de se connecter),
@@ -22,6 +21,10 @@ $routes->get('operateur/login', 'OperateurController::login');
 $routes->post('operateur/login', 'OperateurController::attempt');
 
 $routes->group('operateur', ['filter' => 'operateurAuth'], static function ($routes): void {
+    $routes->get('promotions', 'OperateurController::promotions');
+    $routes->post('promotions', 'OperateurController::storePromotion');
+    $routes->post('promotions/(:num)/deactivate', 'OperateurController::deactivatePromotion/$1');
+
     $routes->get('prefixes', 'OperateurController::prefixes');
     $routes->post('prefixes', 'OperateurController::storePrefixe');
     $routes->post('prefixes/(:num)/delete', 'OperateurController::deletePrefixe/$1');

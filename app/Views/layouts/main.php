@@ -33,6 +33,7 @@
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Operateur</a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= site_url('operateur/prefixes') ?>">Prefixes</a></li>
+                        <li><a class="dropdown-item" href="<?= site_url('operateur/promotions') ?>">Promotions</a></li>
                         <li><a class="dropdown-item" href="<?= site_url('operateur/types-operation') ?>">Types &amp; Frais</a></li>
                         <li><a class="dropdown-item" href="<?= site_url('operateur/comptes') ?>">Comptes clients</a></li>
                         <li><a class="dropdown-item" href="<?= site_url('operateur/gains') ?>">Gains</a></li>

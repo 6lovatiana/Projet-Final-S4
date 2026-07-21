@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Models\PromotionModel;
 use App\Models\FraisModel;
 use App\Models\PrefixeModel;
 use App\Models\TypeOperationModel;
@@ -12,18 +13,55 @@ class OperateurController extends BaseController
     protected PrefixeModel $prefixeModel;
     protected TypeOperationModel $typeOperationModel;
     protected FraisModel $fraisModel;
+    protected PromotionModel $promotionModel;
 
     public function __construct()
     {
         $this->prefixeModel       = new PrefixeModel();
         $this->typeOperationModel = new TypeOperationModel();
         $this->fraisModel         = new FraisModel();
+        $this->promotionModel     = new PromotionModel();
     }
 
     // ------------------------------------------------------------------
     // Authentification operateur
     // ------------------------------------------------------------------
 
+
+    public function promotions()
+    {
+        return view('operateur/promotions', [
+            'promotions' => $this->promotionModel->orderBy('created_at', 'DESC')->findAll(),
+        ]);
+    }
+
+    public function storePromotion()
+    {
+        $rules = [
+            'pourcentage' => 'required|numeric|greater_than[0]|less_than_equal_to[100]',
+        ];
+
+        if (! $this->validate($rules)) {
+            return redirect()->to('operateur/promotions')->withInput()->with('errors', $this->validator->getErrors());
+        }
+
+        // Une seule promotion active a la fois : on desactive les precedentes.
+        $this->promotionModel->where('actif', 1)->set(['actif' => 0])->update();
+
+        $this->promotionModel->insert([
+            'pourcentage' => $this->request->getPost('pourcentage'),
+            'actif'       => 1,
+        ]);
+
+        return redirect()->to('operateur/promotions')->with('success', 'Promotion activee.');
+    }
+
+    public function deactivatePromotion(int $id)
+    {
+        $this->promotionModel->update($id, ['actif' => 0]);
+
+        return redirect()->to('operateur/promotions')->with('success', 'Promotion desactivee.');
+    }
     public function login()
     {
         return view('operateur/login');

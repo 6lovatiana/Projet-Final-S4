@@ -28,6 +28,20 @@ INSERT INTO prefixes (prefixe, status, pourcentage_commission) VALUES
     ('031', 'autre', 2);
 
 -- ---------------------------------------------------------------------
+-- Table : promotions
+-- Promotion en pourcentage appliquee uniquement sur les frais de
+-- transfert interne.
+-- ---------------------------------------------------------------------
+DROP TABLE IF EXISTS promotions;
+CREATE TABLE promotions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    pourcentage  DECIMAL(5,2) NOT NULL,
+    actif        INTEGER NOT NULL DEFAULT 0,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ---------------------------------------------------------------------
 -- Table : clients
 -- Un client = un numero de telephone (login automatique, pas d'inscription)
 -- ---------------------------------------------------------------------

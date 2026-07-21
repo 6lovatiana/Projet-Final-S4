@@ -22,6 +22,23 @@ class TransactionModel extends Model
         'solde_apres',
     ];
 
+
+    private function appliquerPromotion(float $frais, bool $estExterne): float
+    {
+        if ($estExterne) {
+            return $frais;
+        }
+
+        $promotionModel = model(PromotionModel::class);
+        $pourcentage    = $promotionModel->pourcentageActif();
+
+        if ($pourcentage <= 0) {
+            return $frais;
+        }
+
+        return round($frais * (1 - $pourcentage / 100), 2);
+    }
+
     /**
      * Lit le bareme dans la table `frais` pour un type d'operation et un montant donnes.
      */
@@ -144,6 +161,7 @@ class TransactionModel extends Model
 
         $montantCredite = $montantSaisi + $fraisRetraitInclus;
         $fraisTransfert = $this->calculerFrais($typeId, $montantSaisi);
+        $fraisTransfert = $this->appliquerPromotion($fraisTransfert, $estExterne);
         $commission     = $estExterne ? round($montantSaisi * $pourcentageCommission / 100, 2) : 0.0;
 
         $totalDebit = $montantCredite + $fraisTransfert + $commission;
