@@ -63,11 +63,19 @@ class TransactionModel extends Model
 
         $this->db->transStart();
 
-        $client     = $clientModel->find($clientId);
-        $soldeApresCredit  = $client->solde + $montant;
-        $montantEpargne    = round($montant * ((float) $client->pourcentage_epargne / 100), 2);
+        $client = $clientModel->find($clientId);
+
+        if ($client === null) {
+            throw new \RuntimeException('Client introuvable.');
+        }
+
+        $soldeActuel       = (float) ($client->solde ?? 0);
+        $soldeEpargneActuel = (float) ($client->solde_epargne ?? 0);
+        $pourcentageEpargne = (float) ($client->pourcentage_epargne ?? 0);
+        $soldeApresCredit  = $soldeActuel + $montant;
+        $montantEpargne    = round($montant * ($pourcentageEpargne / 100), 2);
         $soldeFinal        = $soldeApresCredit - $montantEpargne;
-        $soldeEpargneApres = $client->solde_epargne + $montantEpargne;
+        $soldeEpargneApres = $soldeEpargneActuel + $montantEpargne;
 
         $clientModel->update($clientId, [
             'solde'         => $soldeFinal,
@@ -79,7 +87,7 @@ class TransactionModel extends Model
             'client_id'         => $clientId,
             'montant'           => $montant,
             'frais'             => 0.0,
-            'solde_avant'       => $client->solde,
+            'solde_avant'       => $soldeActuel,
             'solde_apres'       => $soldeFinal,
         ]);
 
@@ -114,16 +122,22 @@ class TransactionModel extends Model
         $this->db->transStart();
 
         $client = $clientModel->find($clientId);
+
+        if ($client === null) {
+            throw new \RuntimeException('Client introuvable.');
+        }
+
+        $soldeActuel = (float) ($client->solde ?? 0);
         $typeId = $this->getCodeId('retrait');
         $frais  = $this->calculerFrais($typeId, $montant);
         $total  = $montant + $frais;
 
-        if ($client->solde < $total) {
+        if ($soldeActuel < $total) {
             $this->db->transRollback();
             throw new \RuntimeException('Solde insuffisant.');
         }
 
-        $soldeApres = $client->solde - $total;
+        $soldeApres = $soldeActuel - $total;
 
         $clientModel->update($clientId, ['solde' => $soldeApres]);
 
@@ -132,7 +146,7 @@ class TransactionModel extends Model
             'client_id'         => $clientId,
             'montant'           => $montant,
             'frais'             => $frais,
-            'solde_avant'       => $client->solde,
+            'solde_avant'       => $soldeActuel,
             'solde_apres'       => $soldeApres,
         ]);
 

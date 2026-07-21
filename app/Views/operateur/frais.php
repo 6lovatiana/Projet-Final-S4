@@ -1,10 +1,10 @@
 <div class="card mb-4">
     <div class="card-header">
-        <strong><?= esc($type['libelle']) ?></strong>
-        <span class="text-muted">(<?= esc($type['code']) ?>)</span>
+        <strong><?= esc($type['libelle'] ?? '') ?></strong>
+        <span class="text-muted">(<?= esc($type['code'] ?? '') ?>)</span>
     </div>
     <div class="card-body">
-        <?php if (empty($type['frais'])) : ?>
+        <?php if (empty($type['frais'] ?? [])) : ?>
             <p class="text-muted mb-0">Aucun frais applicable (operation gratuite).</p>
         <?php else : ?>
             <div class="row fw-bold small text-muted mb-2">
@@ -13,7 +13,7 @@
                 <div class="col-3">Frais</div>
                 <div class="col-3"></div>
             </div>
-            <?php foreach ($type['frais'] as $ligne) : ?>
+            <?php foreach (($type['frais'] ?? []) as $ligne) : ?>
                 <form method="post" action="<?= site_url('operateur/frais/' . $ligne['id']) ?>" class="row g-2 align-items-center mb-2">
                     <?= csrf_field() ?>
                     <div class="col-3">
